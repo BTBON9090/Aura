@@ -46,8 +46,8 @@ class PhotoImportEngine {
       final AssetEntity original = photos.first;
 
       // 3. 获取真实物理文件
-      final File? originFile = await original.originFile;
-      if (originFile == null) return false;
+      final File? file = await original.file;
+      if (file == null) return false;
 
       // 4. 构建绝对沙盒路径
       final Directory appDir = await getApplicationSupportDirectory();
@@ -55,14 +55,14 @@ class PhotoImportEngine {
       final String sandboxPath = "${appDir.path}/$fileName";
 
       // 5. 核心动作：物理隔离 Copy
-      await originFile.copy(sandboxPath);
+      await file.copy(sandboxPath);
 
       // 6. 发放 Aura 数据库身份证
       final imageModel = ImageModel()
         ..path = sandboxPath
         ..filename = fileName
         ..extension = fileName.split('.').last.toLowerCase()
-        ..sizeBytes = await originFile.length()
+        ..sizeBytes = await file.length()
         ..width = original.width
         ..height = original.height
         ..addedTime = DateTime.now()

@@ -3,6 +3,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 // 引入数据库和刚才写的吸入引擎
 import 'data/isar_service.dart';
 import 'features/photos/photo_import_engine.dart';
+import 'features/photos/photo_gallery_view.dart';
+
+
 
 void main() async {
   // 确保系统底层通道建立
@@ -93,38 +96,9 @@ class _MainSkeletonState extends State<MainSkeleton> {
     );
   }
 
-  // 照片 Tab（包含巨大的魅影紫吸入按钮）
+  // 照片 Tab（接入真实的 Isar 画廊数据）
   Widget _buildPhotoTab() {
-    return Center(
-      child: Builder(
-        builder: (context) {
-          return ElevatedButton.icon(
-            onPressed: () async {
-              // 触发沙盒吸入引擎
-              bool success = await PhotoImportEngine.suckLatestPhoto();
-              if (success && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ 一张照片已成功吸入 Aura 沙盒！', style: TextStyle(color: Colors.white)),
-                    backgroundColor: Color(0xFFE70FAD),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
-            },
-            icon: const Icon(LucideIcons.zap, color: Colors.white),
-            label: const Text('吸入最新照片到沙盒', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE70FAD),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              elevation: 8,
-              shadowColor: const Color(0xFFE70FAD).withOpacity(0.5),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-          );
-        }
-      ),
-    );
+    return const PhotoGalleryView();
   }
 
   // 相册 Tab
