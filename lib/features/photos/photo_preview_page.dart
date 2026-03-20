@@ -8,11 +8,18 @@ import '../../data/models/image_model.dart';
 class PhotoPreviewPage extends StatefulWidget {
   final List<ImageModel> photos;
   final int initialIndex;
+  
+  // 🚀 新增：如果传入了这个 Notifier，就代表是从“多选模式”进入的“简易预览”
+  final ValueNotifier<Set<int>>? multiSelectNotifier;
 
-  const PhotoPreviewPage({super.key, required this.photos, required this.initialIndex});
+  const PhotoPreviewPage({
+    super.key, 
+    required this.photos, 
+    required this.initialIndex,
+    this.multiSelectNotifier,
+  });
 
   @override
-  // 🚀 核心引入 1：混入 TickerProviderStateMixin 开启 120Hz 动画引擎
   State<PhotoPreviewPage> createState() => _PhotoPreviewPageState();
 }
 
@@ -21,10 +28,11 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
   late int _currentIndex;
   bool _isImmersive = false;
 
-  // 🚀 核心引入 2：双击物理阻尼动画控制器
   late AnimationController _doubleClickAnimationController;
   Animation<double>? _doubleClickAnimation;
   late void Function() _doubleClickAnimationListener;
+
+  bool get _isSimplifiedMode => widget.multiSelectNotifier != null;
 
   @override
   void initState() {
@@ -32,7 +40,6 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
     _currentIndex = widget.initialIndex;
     _pageController = ExtendedPageController(initialPage: _currentIndex);
     
-    // 初始化 300 毫秒的顶级跟手动画时钟
     _doubleClickAnimationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -42,14 +49,15 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
   @override
   void dispose() {
     _pageController.dispose();
-    _doubleClickAnimationController.dispose(); // 释放动画内存
+    _doubleClickAnimationController.dispose();
     super.dispose();
   }
 
   void _toggleImmersive() {
-    setState(() {
-      _isImmersive = !_isImmersive;
-    });
+    // 简易模式下，不支持全屏沉浸（因为顶部需要保留 Checkbox）
+    if (!_isSimplifiedMode) {
+      setState(() => _isImmersive = !_isImmersive);
+    }
   }
 
   @override
@@ -63,13 +71,12 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
         backgroundColor: Colors.transparent,
         body: Stack(
           children:[
-            // 1. 核心手势缩放视图
+            // 1. 底层核心图片视图 (完全一致)
             GestureDetector(
               onTap: _toggleImmersive,
               child: ExtendedImageGesturePageView.builder(
                 controller: _pageController,
                 itemCount: widget.photos.length,
-                // 🚀 核心修复 1：使用 PageScrollPhysics 恢复极速“翻页吸附”特性，并嵌套阻尼保留边缘回弹
                 physics: const PageScrollPhysics(), 
                 onPageChanged: (int index) {
                   setState(() => _currentIndex = index);
@@ -84,29 +91,15 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
                       mode: ExtendedImageMode.gesture,
                       enableMemoryCache: true,
                       clearMemoryCacheWhenDispose: false,
-                      // 🚀 核心修复 2：偷梁换柱！高精度原图解码时，瞬间调取画廊中已存在的 400px 微缩图垫底！
                       loadStateChanged: (ExtendedImageState state) {
                         if (state.extendedImageLoadState == LoadState.loading) {
-                          // 借用内存中瞬间可取的缩略图（因为 cacheWidth=400 和画廊一致，命中率 100%）
-                          return ExtendedImage.file(
-                            File(item.path),
-                            fit: BoxFit.contain,
-                            cacheWidth: 400, 
-                            enableLoadState: false, // 防止无限循环
-                          );
+                          return ExtendedImage.file(File(item.path), fit: BoxFit.contain, cacheWidth: 400, enableLoadState: false);
                         }
-                        return null; // 原图解码完成后，自动无缝显示超清原图
+                        return null; 
                       },
                       initGestureConfigHandler: (state) {
                         return GestureConfig(
-                          minScale: 0.9,
-                          animationMinScale: 0.7,
-                          maxScale: 4.0,
-                          animationMaxScale: 4.5,
-                          speed: 1.0, // 恢复原本的极速滑动响应
-                          inertialSpeed: 150.0,
-                          initialScale: 1.0,
-                          inPageView: true,
+                          minScale: 0.9, maxScale: 4.0, animationMaxScale: 4.5, speed: 1.0, inertialSpeed: 150.0, inPageView: true,
                         );
                       },
                       onDoubleTap: (ExtendedImageGestureState state) {
@@ -119,17 +112,11 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
                         _doubleClickAnimationController.reset();
 
                         _doubleClickAnimationListener = () {
-                          state.handleDoubleTap(
-                            scale: _doubleClickAnimation!.value,
-                            doubleTapPosition: pointerDownPosition,
-                          );
+                          state.handleDoubleTap(scale: _doubleClickAnimation!.value, doubleTapPosition: pointerDownPosition);
                         };
 
                         _doubleClickAnimation = Tween<double>(begin: begin, end: end).animate(
-                          CurvedAnimation(
-                            parent: _doubleClickAnimationController, 
-                            curve: Curves.easeInOutCubic,
-                          ),
+                          CurvedAnimation(parent: _doubleClickAnimationController, curve: Curves.easeInOutCubic),
                         );
                         _doubleClickAnimation!.addListener(_doubleClickAnimationListener);
                         _doubleClickAnimationController.forward();
@@ -140,7 +127,7 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
               ),
             ),
 
-            // 顶部操作栏
+            // 2. 顶部操作栏（智能区分模式）
             AnimatedPositioned(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeInOut,
@@ -150,64 +137,89 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage> with TickerProvider
               child: SafeArea(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  color: Colors.white.withOpacity(0.8),
+                  color: _isSimplifiedMode ? Colors.transparent : Colors.white.withOpacity(0.8),
                   child: Row(
                     children:[
+                      // 左侧：关闭/返回
                       IconButton(
-                        icon: const Icon(LucideIcons.chevronLeft, size: 28, color: Color(0xFF1A1A1A)),
+                        icon: Icon(_isSimplifiedMode ? LucideIcons.x : LucideIcons.chevronLeft, size: 28, color: const Color(0xFF1A1A1A)),
                         onPressed: () => Navigator.pop(context),
                       ),
+                      
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children:[
-                            Text(
-                              photo.filename,
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A)),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              "${DateFormat('yyyy-MM-dd HH:mm:ss').format(photo.createdTime)}  |  ${photo.extension.toUpperCase()}",
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          ],
-                        ),
+                        child: _isSimplifiedMode 
+                            ? const SizedBox() // 简易模式不显示中间信息
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children:[
+                                  Text(photo.filename, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  Text("${DateFormat('yyyy-MM-dd HH:mm:ss').format(photo.createdTime)}  |  ${photo.extension.toUpperCase()}", style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                ],
+                              ),
                       ),
-                      IconButton(
-                        icon: const Icon(LucideIcons.maximize, color: Color(0xFFE70FAD)),
-                        onPressed: _toggleImmersive,
-                      ),
+
+                      // 右侧：全屏按钮 或 多选 Checkbox
+                      if (_isSimplifiedMode)
+                        ValueListenableBuilder<Set<int>>(
+                          valueListenable: widget.multiSelectNotifier!,
+                          builder: (context, selectedIds, _) {
+                            final bool isSelected = selectedIds.contains(photo.id);
+                            return IconButton(
+                              onPressed: () {
+                                final currentSet = Set<int>.from(selectedIds);
+                                if (isSelected) {
+                                  currentSet.remove(photo.id);
+                                } else {
+                                  currentSet.add(photo.id);
+                                }
+                                widget.multiSelectNotifier!.value = currentSet;
+                              },
+                              icon: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: isSelected ? const Color(0xFFE70FAD) : Colors.black.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(10), // 动态大圆角
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                                child: isSelected ? const Icon(LucideIcons.check, size: 18, color: Colors.white) : null,
+                              ),
+                            );
+                          }
+                        )
+                      else
+                        IconButton(icon: const Icon(LucideIcons.maximize, color: Color(0xFFE70FAD)), onPressed: _toggleImmersive),
                     ],
                   ),
                 ),
               ),
             ),
 
-            // 底部操作栏
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              bottom: _isImmersive ? -100 : 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  color: Colors.white.withOpacity(0.9),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children:[
-                      _buildBottomAction(LucideIcons.folderPlus, "相册"),
-                      _buildBottomAction(LucideIcons.tag, "标签"),
-                      _buildBottomAction(LucideIcons.star, "评分"),
-                      _buildBottomAction(LucideIcons.trash2, "删除", color: Colors.redAccent),
-                      _buildBottomAction(LucideIcons.moreHorizontal, "更多"),
-                    ],
+            // 3. 底部操作栏（仅普通模式显示）
+            if (!_isSimplifiedMode)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                bottom: _isImmersive ? -100 : 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    color: Colors.white.withOpacity(0.9),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children:[
+                        _buildBottomAction(LucideIcons.folderPlus, "相册"),
+                        _buildBottomAction(LucideIcons.tag, "标签"),
+                        _buildBottomAction(LucideIcons.star, "评分"),
+                        _buildBottomAction(LucideIcons.trash2, "删除", color: Colors.redAccent),
+                        _buildBottomAction(LucideIcons.moreHorizontal, "更多"),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

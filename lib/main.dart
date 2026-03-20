@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 🚀 引入震动反馈
 import 'package:lucide_icons/lucide_icons.dart';
-// 引入数据库和刚才写的吸入引擎
+// 引入数据库和各个子页面
 import 'data/isar_service.dart';
-import 'features/photos/photo_import_engine.dart';
 import 'features/photos/photo_gallery_view.dart';
-
-
+import 'features/albums/albums_tab.dart'; // 🚀 引入刚才写好的相册页
 
 void main() async {
   // 确保系统底层通道建立
@@ -57,8 +56,8 @@ class _MainSkeletonState extends State<MainSkeleton> {
           IndexedStack(
             index: _currentIndex,
             children:[
-              _buildPhotoTab(), // 照片测试页
-              _buildAlbumTab(), // 相册页
+              const PhotoGalleryView(), // Tab 1: 照片
+              const AlbumsTab(),        // 🚀 Tab 2: 真实的相册页
             ],
           ),
           
@@ -96,18 +95,6 @@ class _MainSkeletonState extends State<MainSkeleton> {
     );
   }
 
-  // 照片 Tab（接入真实的 Isar 画廊数据）
-  Widget _buildPhotoTab() {
-    return const PhotoGalleryView();
-  }
-
-  // 相册 Tab
-  Widget _buildAlbumTab() {
-    return const Center(
-      child: Text('相册', style: TextStyle(fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 2)),
-    );
-  }
-
   // 底部导航 Icon 微动效
   Widget _buildNavItem(int index, IconData icon) {
     final isSelected = _currentIndex == index;
@@ -115,7 +102,12 @@ class _MainSkeletonState extends State<MainSkeleton> {
     final inactiveColor = const Color(0xFFB0B0B0);
 
     return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        if (_currentIndex != index) {
+          HapticFeedback.lightImpact(); // 🚀 加入极其轻微的切换震动反馈
+          setState(() => _currentIndex = index);
+        }
+      },
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
