@@ -8,11 +8,11 @@ class IsarService {
   static late Isar db;
 
   static Future<void> init() async {
-    final dir = await getApplicationSupportDirectory(); 
-    db = await Isar.open(
-      [ImageModelSchema, AlbumModelSchema],
-      directory: dir.path,
-    );
+    final dir = await getApplicationSupportDirectory();
+    db = await Isar.open([
+      ImageModelSchema,
+      AlbumModelSchema,
+    ], directory: dir.path);
     // 启动后自动执行一次清理
     await cleanExpiredPhotos();
   }
@@ -51,14 +51,14 @@ class IsarService {
   // 90天自动清理引擎
   static Future<void> cleanExpiredPhotos() async {
     final ninetyDaysAgo = DateTime.now().subtract(const Duration(days: 90));
-    
+
     // 查找已删除且超过 90 天的照片
     final expiredPhotos = await db.imageModels
         .filter()
         .deletedTimeIsNotNull()
         .deletedTimeLessThan(ninetyDaysAgo)
         .findAll();
-        
+
     if (expiredPhotos.isNotEmpty) {
       final ids = expiredPhotos.map((e) => e.id).toList();
       await hardDeletePhotos(ids);
@@ -73,7 +73,7 @@ class IsarService {
     final album = AlbumModel()
       ..name = name
       ..createdAt = DateTime.now();
-      
+
     await db.writeTxn(() async {
       await db.albumModels.put(album);
     });
@@ -87,7 +87,8 @@ class IsarService {
 
   // 3. 获取某个相册里的照片数量
   static Future<int> getPhotoCountInAlbum(int albumId) async {
-    return await db.imageModels.filter()
+    return await db.imageModels
+        .filter()
         .deletedTimeIsNull()
         .albumIdsElementEqualTo(albumId)
         .count();
@@ -95,7 +96,8 @@ class IsarService {
 
   // 4. 获取相册封面 (获取该相册下最新添加的一张照片)
   static Future<String?> getAlbumCover(int albumId) async {
-    final photo = await db.imageModels.filter()
+    final photo = await db.imageModels
+        .filter()
         .deletedTimeIsNull()
         .albumIdsElementEqualTo(albumId)
         .sortByAddedTimeDesc()
@@ -104,7 +106,10 @@ class IsarService {
   }
 
   // 5. 将选中的照片批量装入指定的相册
-  static Future<void> addPhotosToAlbum(List<int> photoIds, int targetAlbumId) async {
+  static Future<void> addPhotosToAlbum(
+    List<int> photoIds,
+    int targetAlbumId,
+  ) async {
     await db.writeTxn(() async {
       for (var id in photoIds) {
         final photo = await db.imageModels.get(id);
@@ -121,34 +126,72 @@ class IsarService {
     });
   }
 
-  // ==========================================
-  // 🚀 Aura 资产管理核心方法 (Phase 1 补充)
-  // ==========================================
+  // 6. 获取照片所在的相册名称列表
+  static Future<List<String>> getAlbumNamesForPhoto(List<int> albumIds) async {
+    if (albumIds.isEmpty) return [];
+    final albums = await db.albumModels
+        .where()
+        .anyOf(albumIds, (q, id) => q.idEqualTo(id))
+        .findAll();
+    return albums.map((a) => a.name).toList();
+  }
 
-  // 1. 更新评分
-  static Future<void> updateImageRating(int id, int rating) async {
-    if (db == null) return;
-    await db!.writeTxn(() async {
-      final image = await db!.imageModels.get(id);
-      if (image != null) {
-        image.rating = rating;
-        image.modifiedTime = DateTime.now(); // 触发修改时间更新
-        await db!.imageModels.put(image);
+  // 7. 检查照片是否已在某个相册中
+  static Future<bool> isPhotoInAlbum(int photoId, int albumId) async {
+    final photo = await db.imageModels.get(photoId);
+    return photo?.albumIds.contains(albumId) ?? false;
+  }
+
+  // ================= 🚀 资产元数据更新事务 =================
+
+  // 1. 极速更新照片评分 (0-5分)
+  static Future<void> updateImageRating(int imageId, int newRating) async {
+    await db.writeTxn(() async {
+      final photo = await db.imageModels.get(imageId);
+      if (photo != null) {
+        photo.rating = newRating; // 写入新评分
+        await db.imageModels.put(photo);
       }
     });
   }
 
-  // 2. 更新标签
-  static Future<void> updateImageTags(int id, List<String> tags) async {
-    if (db == null) return;
-    await db!.writeTxn(() async {
-      final image = await db!.imageModels.get(id);
-      if (image != null) {
-        image.tags = tags;
-        image.modifiedTime = DateTime.now();
-        await db!.imageModels.put(image);
+  // ================= 🚀 资产元数据更新事务 =================
+  // （如果你之前写过 updateImageRating，就紧跟在它下面）
+
+  // 2. 更新照片的标签数组
+  static Future<void> updateImageTags(int imageId, List<String> newTags) async {
+    await db.writeTxn(() async {
+      final photo = await db.imageModels.get(imageId);
+      if (photo != null) {
+        photo.tags = newTags; // 覆盖新标签
+        await db.imageModels.put(photo);
       }
     });
+  }
+
+  // 3. 超光速全库扫描：获取当前存在的所有唯一标签 (用于搜索联想)
+  static Future<List<String>> getAllUniqueTags() async {
+    // 找出所有没被删除的照片
+    final photos = await db.imageModels.filter().deletedTimeIsNull().findAll();
+    final Set<String> uniqueTags = {};
+
+    for (var photo in photos) {
+      if (photo.tags != null) {
+        uniqueTags.addAll(photo.tags!);
+      }
+    }
+
+    final sortedTags = uniqueTags.toList();
+    // 按首字母字典序排列
+    sortedTags.sort((a, b) => a.compareTo(b));
+    return sortedTags;
+  }
+
+  // 4. 获取没有任何标签的“未分类照片”数量
+  static Future<int> getUntaggedCount() async {
+    final photos = await db.imageModels.filter().deletedTimeIsNull().findAll();
+    // 找出 tags 数组为空或者 null 的照片
+    return photos.where((p) => p.tags == null || p.tags!.isEmpty).length;
   }
 
   // 3. 重命名图片
@@ -175,34 +218,10 @@ class IsarService {
         // TODO: 依赖 ImageModel 中新增 deletedAt 字段
         // image.deletedAt = DateTime.now();
         // await db!.imageModels.put(image);
-        
+
         // 临时硬删除用于跑通逻辑 (等模型加上 deletedAt 后改为软删除)
         await db!.imageModels.delete(id);
       }
     });
-  }
-
-  // ==========================================
-  // 🚀 标签与分类统计引擎 (极速防报错版)
-  // ==========================================
-
-  static Future<List<String>> getAllUniqueTags() async {
-    if (db == null) return[];
-    // 仅提取 tags 列，不加载图片对象，规避了 isNull 报错，且性能极高
-    final tagsList = await db!.imageModels.where().tagsProperty().findAll();
-    final Set<String> uniqueTags = {};
-    for (var tags in tagsList) {
-      if (tags != null) uniqueTags.addAll(tags);
-    }
-    final result = uniqueTags.toList();
-    result.sort();
-    return result;
-  }
-
-  static Future<int> getUntaggedCount() async {
-    if (db == null) return 0;
-    // 同样只查 tags 列，在内存中瞬间统计 null 和空数组的数量
-    final tagsList = await db!.imageModels.where().tagsProperty().findAll();
-    return tagsList.where((tags) => tags == null || tags.isEmpty).length;
   }
 }

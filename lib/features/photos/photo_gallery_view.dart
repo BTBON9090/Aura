@@ -9,6 +9,7 @@ import '../../data/isar_service.dart';
 import '../../data/models/image_model.dart';
 import 'photo_import_engine.dart';
 import 'photo_preview_page.dart';
+import 'photo_action_sheets.dart';
 
 // 🚀 核心新增：全局多选状态广播！用于通知骨架屏隐藏/显示底部导航
 final ValueNotifier<bool> globalMultiSelectNotifier = ValueNotifier(false);
@@ -16,39 +17,49 @@ final ValueNotifier<bool> globalMultiSelectNotifier = ValueNotifier(false);
 class FilterOptions {
   Set<int> ratings = {};
   Set<String> extensions = {};
-  String? aspectRatio; 
-  bool get isEmpty => ratings.isEmpty && extensions.isEmpty && aspectRatio == null;
-  void clear() { ratings.clear(); extensions.clear(); aspectRatio = null; }
+  String? aspectRatio;
+  bool get isEmpty =>
+      ratings.isEmpty && extensions.isEmpty && aspectRatio == null;
+  void clear() {
+    ratings.clear();
+    extensions.clear();
+    aspectRatio = null;
+  }
 }
 
 class PhotoGalleryView extends StatefulWidget {
   final int? albumId; // 如果为 null，则显示全部
   final String? filterType; // 'high_rated', 'screenshots', 'deleted' 等
   final String title; // 页面标题
-  const PhotoGalleryView({super.key, this.albumId, this.filterType, this.title = 'Aura'});
+  const PhotoGalleryView({
+    super.key,
+    this.albumId,
+    this.filterType,
+    this.title = 'Aura',
+  });
   @override
-  State<PhotoGalleryView> createState() => _PhotoGalleryViewState();//
+  State<PhotoGalleryView> createState() => _PhotoGalleryViewState(); //
 }
 
 class _PhotoGalleryViewState extends State<PhotoGalleryView> {
-  List<ImageModel> _photos =[];
+  List<ImageModel> _photos = [];
   bool _isLoading = true;
 
-  final List<int> _columnLevels =[2, 3, 4, 5, 8, 16];
-  int _currentColIndex = 1; 
+  final List<int> _columnLevels = [2, 3, 4, 5, 8, 16];
+  int _currentColIndex = 1;
   int _baseColIndex = 1;
 
   // 🚀 使用内部滚动监听替代 ScrollController
-  double _gridScrollOffset = 0.0; 
+  double _gridScrollOffset = 0.0;
 
   bool _isSelectingMode = false;
   final ValueNotifier<Set<int>> _selectedIdsNotifier = ValueNotifier({});
 
   bool _isDragSelecting = false;
-  bool _dragSelectModeIsSelecting = true; 
-  int? _dragStartIndex; 
-  int? _dragCurrentIndex; 
-  Set<int> _preDragSelectedIds = {}; 
+  bool _dragSelectModeIsSelecting = true;
+  int? _dragStartIndex;
+  int? _dragCurrentIndex;
+  Set<int> _preDragSelectedIds = {};
 
   final FilterOptions _filterOptions = FilterOptions();
 
@@ -69,7 +80,7 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
     final db = IsarService.db;
     if (db == null) return;
     // 1. 基础查询：如果是回收站，找已删除的；否则找未删除的
-    var query = widget.filterType == 'deleted' 
+    var query = widget.filterType == 'deleted'
         ? db.imageModels.filter().deletedTimeIsNotNull()
         : db.imageModels.filter().deletedTimeIsNull();
 
@@ -80,18 +91,95 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
       query = query.albumIdsElementEqualTo(widget.albumId!);
     }
 
-    // 3. 叠加“极客筛选”面板的条件 (如果你之前写了这块逻辑)
-    // ... 其他 filterOptions 的判断 ...
-
     final photos = await query.sortByAddedTimeDesc().findAll();
+
+    // 3. 根据 filterType 进行特定筛选
+    var filteredPhotos = photos;
+
+    // 视频筛选
+    if (widget.filterType == 'videos') {
+      const videoExtensions = [
+        'mp4',
+        'mov',
+        'avi',
+        'mkv',
+        'webm',
+        '3gp',
+        'flv',
+        'wmv',
+        'm4v',
+        'mpeg',
+        'mpg',
+      ];
+      filteredPhotos = filteredPhotos
+          .where((p) => videoExtensions.contains(p.extension.toLowerCase()))
+          .toList();
+    }
+
+    if (widget.filterType == 'screenshots') {
+      final screenshotKeywords = [
+        'screenshot',
+        'screen_shot',
+        'screen-shot',
+        '截屏',
+        '截图',
+        '1774104680468074',
+      ];
+      filteredPhotos = filteredPhotos.where((p) {
+        final pathLower = p.path.toLowerCase();
+        final nameLower = p.filename.toLowerCase();
+        return screenshotKeywords.any(
+          (keyword) =>
+              pathLower.contains(keyword.toLowerCase()) ||
+              nameLower.contains(keyword.toLowerCase()),
+        );
+      }).toList();
+    }
+
+    // 4. 在内存中应用"极客筛选"面板的条件
+    if (_filterOptions.ratings.isNotEmpty) {
+      filteredPhotos = filteredPhotos
+          .where((p) => _filterOptions.ratings.contains(p.rating))
+          .toList();
+    }
+
+    if (_filterOptions.extensions.isNotEmpty) {
+      filteredPhotos = filteredPhotos
+          .where(
+            (p) =>
+                _filterOptions.extensions.contains(p.extension.toLowerCase()),
+          )
+          .toList();
+    }
+
+    if (_filterOptions.aspectRatio != null) {
+      final ratio = _filterOptions.aspectRatio;
+      if (ratio == 'landscape') {
+        filteredPhotos = filteredPhotos
+            .where((p) => p.width > p.height)
+            .toList();
+      } else if (ratio == 'portrait') {
+        filteredPhotos = filteredPhotos
+            .where((p) => p.height > p.width)
+            .toList();
+      } else if (ratio == 'square') {
+        filteredPhotos = filteredPhotos
+            .where((p) => p.width == p.height)
+            .toList();
+      }
+    }
+
     setState(() {
-      _photos = photos;
+      _photos = filteredPhotos;
       _isLoading = false;
     });
   }
 
   void _exitSelection() {
-    setState(() { _isSelectingMode = false; _selectedIdsNotifier.value = {}; });
+    setState(() {
+      _isSelectingMode = false;
+      _selectedIdsNotifier.value = {};
+    });
     globalMultiSelectNotifier.value = false; // 🚀 通知骨架屏：恢复底部胶囊
     HapticFeedback.lightImpact();
   }
@@ -100,144 +188,27 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
     final ids = _selectedIdsNotifier.value.toList();
     if (ids.isEmpty) return;
 
-    await IsarService.softDeletePhotos(ids); 
-    _exitSelection();
-    _loadPhotos(); 
-
-    HapticFeedback.heavyImpact();
-    
-    // 🚀 升级为高级删除提示条
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: const Color(0xFF2C2C2E),
-        content: const Row(
-          children:[
-            Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
-            SizedBox(width: 12),
-            Text('已移至回收站', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-      ),
+    await PhotoActionSheets.showDeleteConfirm(
+      context: context,
+      photoIds: ids,
+      onDelete: () {
+        _exitSelection();
+        _loadPhotos();
+      },
     );
   }
 
-  // 🚀 核心：多选装入相册的底部面板
   void _openAddToAlbumPanel() async {
     final ids = _selectedIdsNotifier.value.toList();
     if (ids.isEmpty) return;
 
-    // 1. 先去数据库把所有的相册拉出来
-    final albums = await IsarService.getCustomAlbums();
-
-    if (!mounted) return;
-
-    // 2. 如果还没有建过相册，提示先去建
-    if (albums.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('你还没有自定义相册，请先去相册页新建', style: TextStyle(color: Colors.white)), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-
-    // 3. 震动反馈并弹出高级感 BottomSheet
-    HapticFeedback.mediumImpact();
-    showModalBottomSheet(
+    await PhotoActionSheets.showAlbumPicker(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) => Container(
-        padding: const EdgeInsets.only(left: 24, right: 24, top: 12, bottom: 40),
-        decoration: const BoxDecoration(
-          color: Color(0xFFF6F6F8),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children:[
-              Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
-              const SizedBox(height: 24),
-              const Text("装入相册", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF1A1A1A))),
-              const SizedBox(height: 16),
-              // 渲染相册列表
-              ...albums.map((album) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(LucideIcons.image, color: Color(0xFFE70FAD)),
-                ),
-                title: Text(album.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                onTap: () async {
-                  HapticFeedback.selectionClick();
-                  
-                  // 🚀 核心修复 1：在 await 发生前，提前锁定 ScaffoldMessenger 的实例！
-                  // 避免 await 延迟后 context 找不到原本的 Scaffold
-                  final messenger = ScaffoldMessenger.of(context);
-                  
-                  // 1. 先关掉底部面板
-                  Navigator.pop(sheetContext); 
-                  
-                  // 2. 执行装入动作
-                  await IsarService.addPhotosToAlbum(ids, album.id);
-                  _exitSelection(); // 退出多选模式
-                  
-                  // 等待底部面板的退出动画完全结束 (300ms)
-                  await Future.delayed(const Duration(milliseconds: 300));
-                  
-                  if (!mounted) return;
-                  
-                  messenger.hideCurrentSnackBar(); 
-                  
-                  // 🚀 核心修复 2：获取 SnackBar 的控制器，方便后续强制销毁
-                  final controller = messenger.showSnackBar(
-                    SnackBar(
-                      elevation: 0,
-                      behavior: SnackBarBehavior.floating,
-                      margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      backgroundColor: const Color(0xFF2C2C2E),
-                      content: Row(
-                        children:[
-                          const Icon(LucideIcons.checkCircle2, color: Color(0xFFE70FAD), size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text('已装入「${album.name}」', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold))),
-                        ],
-                      ),
-                      action: SnackBarAction(
-                        label: '去查看',
-                        textColor: const Color(0xFFE70FAD),
-                        onPressed: () {
-                          // 使用提前锁定的 messenger 隐藏
-                          messenger.hideCurrentSnackBar();
-                          Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => PhotoGalleryView(title: album.name, albumId: album.id)
-                          ));
-                        },
-                      ),
-                      duration: const Duration(seconds: 4), 
-                    ),
-                  );
-
-                  // 🚀 核心修复 3：打破安卓系统无障碍机制的拦截，强制 4 秒后关门！
-                  Future.delayed(const Duration(seconds: 4), () {
-                    try {
-                      controller.close(); // 强行销毁该提示条
-                    } catch (_) {}
-                  });
-                },
-              )).toList(),
-            ],
-          ),
-        ),
-      ),
+      photoIds: ids,
+      onUpdate: () {
+        _exitSelection();
+        _loadPhotos();
+      },
     );
   }
 
@@ -253,22 +224,29 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
   }
 
   void _toggleSelectAll() {
-    if (_selectedIdsNotifier.value.length == _photos.length) _selectedIdsNotifier.value = {};
-    else _selectedIdsNotifier.value = Set.from(_photos.map((p) => p.id));
+    if (_selectedIdsNotifier.value.length == _photos.length)
+      _selectedIdsNotifier.value = {};
+    else
+      _selectedIdsNotifier.value = Set.from(_photos.map((p) => p.id));
     HapticFeedback.selectionClick();
   }
 
   int? _calculateIndexFromPosition(Offset localPosition) {
     if (_photos.isEmpty) return null;
     final int cols = _columnLevels[_currentColIndex];
-    final double spacing = cols >= 8 ? 0.5 : (cols == 4 || cols == 5) ? 1.0 : 4.0;
+    final double spacing = cols >= 8
+        ? 0.5
+        : (cols == 4 || cols == 5)
+        ? 1.0
+        : 4.0;
     final double horizontalPadding = cols >= 4 ? 0.0 : 4.0;
-    final double gridWidth = MediaQuery.of(context).size.width - horizontalPadding * 2;
+    final double gridWidth =
+        MediaQuery.of(context).size.width - horizontalPadding * 2;
     final double itemWidth = (gridWidth - spacing * (cols - 1)) / cols;
     final double itemHeight = itemWidth;
 
     // 🚀 使用实时捕获的 _gridScrollOffset 替代 Controller
-    double y = localPosition.dy + _gridScrollOffset; 
+    double y = localPosition.dy + _gridScrollOffset;
     double x = localPosition.dx - horizontalPadding;
     x = x.clamp(0.0, gridWidth - 1.0);
     y = math.max(0.0, y);
@@ -283,93 +261,256 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
     HapticFeedback.mediumImpact();
     // (此处省略原有的 showModalBottomSheet 内部 UI，请保持你之前复制的版本，如果被截断，可以使用之前正常的筛选面板代码)
     showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent, isScrollControlled: true,
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Container(
-          padding: const EdgeInsets.only(left: 24, right: 24, top: 12, bottom: 32),
-          decoration: const BoxDecoration(color: Color(0xFFF6F6F8), borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+          padding: const EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 12,
+            bottom: 32,
+          ),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF6F6F8),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+          ),
           child: SafeArea(
             child: Column(
-              mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
-              children:[
-                Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children:[
-                    const Text("极客筛选", style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF1A1A1A))),
-                    TextButton(onPressed: () { HapticFeedback.lightImpact(); setModalState(() => _filterOptions.clear()); _loadPhotos(); }, child: const Text("重置", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)))
+                  children: [
+                    const Text(
+                      "极客筛选",
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF1A1A1A),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        setModalState(() => _filterOptions.clear());
+                        _loadPhotos();
+                      },
+                      child: const Text(
+                        "重置",
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 24),
                 // 评分
-                const Text("照片评分", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const Text(
+                  "照片评分",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Wrap(
-                  spacing: 12, runSpacing: 12,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: List.generate(6, (index) {
                     final isSelected = _filterOptions.ratings.contains(index);
                     return ChoiceChip(
-                      label: index == 0 ? const Text("未评分") : Row(mainAxisSize: MainAxisSize.min, children:[Text("$index "), const Icon(LucideIcons.star, size: 14)]),
+                      label: index == 0
+                          ? const Text("未评分")
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text("$index "),
+                                const Icon(LucideIcons.star, size: 14),
+                              ],
+                            ),
                       selected: isSelected,
-                      onSelected: (selected) { HapticFeedback.selectionClick(); setModalState(() => selected ? _filterOptions.ratings.add(index) : _filterOptions.ratings.remove(index)); _loadPhotos(); },
+                      onSelected: (selected) {
+                        HapticFeedback.selectionClick();
+                        setModalState(
+                          () => selected
+                              ? _filterOptions.ratings.add(index)
+                              : _filterOptions.ratings.remove(index),
+                        );
+                        _loadPhotos();
+                      },
                       selectedColor: const Color(0xFFE70FAD).withOpacity(0.15),
-                      labelStyle: TextStyle(color: isSelected ? const Color(0xFFE70FAD) : Colors.grey.shade800, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
-                      backgroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? const Color(0xFFE70FAD).withOpacity(0.5) : Colors.transparent)), showCheckmark: false,
+                      labelStyle: TextStyle(
+                        color: isSelected
+                            ? const Color(0xFFE70FAD)
+                            : Colors.grey.shade800,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                      backgroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: isSelected
+                              ? const Color(0xFFE70FAD).withOpacity(0.5)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      showCheckmark: false,
                     );
                   }),
                 ),
                 const SizedBox(height: 24),
                 // 2. 画幅比例筛选
-                    const Text("画幅比例", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      children:[
-                        _buildRatioChip('landscape', '横向', LucideIcons.image, setModalState),
-                        _buildRatioChip('portrait', '纵向', LucideIcons.smartphone, setModalState),
-                        _buildRatioChip('square', '方形', LucideIcons.square, setModalState),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                // 格式
-                const Text("文件格式", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const Text(
+                  "画幅比例",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
-                  children:['jpg', 'png', 'webp', 'heic'].map((ext) {
+                  children: [
+                    _buildRatioChip(
+                      'landscape',
+                      '横向',
+                      LucideIcons.image,
+                      setModalState,
+                    ),
+                    _buildRatioChip(
+                      'portrait',
+                      '纵向',
+                      LucideIcons.smartphone,
+                      setModalState,
+                    ),
+                    _buildRatioChip(
+                      'square',
+                      '方形',
+                      LucideIcons.square,
+                      setModalState,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                // 格式
+                const Text(
+                  "文件格式",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  children: ['jpg', 'png', 'webp', 'heic'].map((ext) {
                     final isSelected = _filterOptions.extensions.contains(ext);
                     return FilterChip(
-                      label: Text(ext.toUpperCase()), selected: isSelected,
-                      onSelected: (selected) { HapticFeedback.selectionClick(); setModalState(() => selected ? _filterOptions.extensions.add(ext) : _filterOptions.extensions.remove(ext)); _loadPhotos(); },
-                      selectedColor: const Color(0xFFE70FAD).withOpacity(0.15), labelStyle: TextStyle(color: isSelected ? const Color(0xFFE70FAD) : Colors.grey.shade800, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
-                      backgroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? const Color(0xFFE70FAD).withOpacity(0.5) : Colors.transparent)), showCheckmark: false,
+                      label: Text(ext.toUpperCase()),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        HapticFeedback.selectionClick();
+                        setModalState(
+                          () => selected
+                              ? _filterOptions.extensions.add(ext)
+                              : _filterOptions.extensions.remove(ext),
+                        );
+                        _loadPhotos();
+                      },
+                      selectedColor: const Color(0xFFE70FAD).withOpacity(0.15),
+                      labelStyle: TextStyle(
+                        color: isSelected
+                            ? const Color(0xFFE70FAD)
+                            : Colors.grey.shade800,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                      backgroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: isSelected
+                              ? const Color(0xFFE70FAD).withOpacity(0.5)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      showCheckmark: false,
                     );
                   }).toList(),
                 ),
               ],
             ),
           ),
-        )
-      )
+        ),
+      ),
     );
   }
 
   // 画幅比例的 UI 辅助组件
-  Widget _buildRatioChip(String ratioValue, String label, IconData icon, StateSetter setModalState) {
+  Widget _buildRatioChip(
+    String ratioValue,
+    String label,
+    IconData icon,
+    StateSetter setModalState,
+  ) {
     final isSelected = _filterOptions.aspectRatio == ratioValue;
     return ChoiceChip(
-      label: Row(mainAxisSize: MainAxisSize.min, children:[Icon(icon, size: 14, color: isSelected ? const Color(0xFFE70FAD) : Colors.grey), const SizedBox(width: 6), Text(label)]),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: isSelected ? const Color(0xFFE70FAD) : Colors.grey,
+          ),
+          const SizedBox(width: 6),
+          Text(label),
+        ],
+      ),
       selected: isSelected,
       onSelected: (selected) {
         HapticFeedback.selectionClick();
-        setModalState(() => _filterOptions.aspectRatio = selected ? ratioValue : null);
+        setModalState(
+          () => _filterOptions.aspectRatio = selected ? ratioValue : null,
+        );
         _loadPhotos();
       },
       selectedColor: const Color(0xFFE70FAD).withOpacity(0.15),
-      labelStyle: TextStyle(color: isSelected ? const Color(0xFFE70FAD) : Colors.grey.shade800, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
+      labelStyle: TextStyle(
+        color: isSelected ? const Color(0xFFE70FAD) : Colors.grey.shade800,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      ),
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? const Color(0xFFE70FAD).withOpacity(0.5) : Colors.transparent)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isSelected
+              ? const Color(0xFFE70FAD).withOpacity(0.5)
+              : Colors.transparent,
+        ),
+      ),
       showCheckmark: false,
     );
   }
@@ -378,79 +519,154 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: !_isSelectingMode,
-      onPopInvoked: (didPop) { if (!didPop && _isSelectingMode) _exitSelection(); },
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSelectingMode) _exitSelection();
+      },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF6F6F8),  // 保持透明，底色由 MainSkeleton 决定
+        backgroundColor: const Color(0xFFF6F6F8), // 保持透明，底色由 MainSkeleton 决定
         body: Stack(
-          children:[
+          children: [
             // 🚀 核心重构：使用 NestedScrollView 搭载 SliverAppBar
             NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {
-                return[
+                return [
                   SliverAppBar(
                     backgroundColor: const Color(0xFFF6F6F8),
                     surfaceTintColor: Colors.transparent,
                     pinned: true,
                     expandedHeight: 120.0, // 默认大排版高度
                     leading: _isSelectingMode
-                        ? IconButton(icon: const Icon(LucideIcons.x, color: Color(0xFF1A1A1A)), onPressed: _exitSelection)
+                        ? IconButton(
+                            icon: const Icon(
+                              LucideIcons.x,
+                              color: Color(0xFF1A1A1A),
+                            ),
+                            onPressed: _exitSelection,
+                          )
                         : null,
                     flexibleSpace: FlexibleSpaceBar(
-                      titlePadding: EdgeInsets.only(left: _isSelectingMode ? 60 : 20, bottom: 16),
+                      titlePadding: EdgeInsets.only(
+                        left: _isSelectingMode ? 60 : 20,
+                        bottom: 16,
+                      ),
                       // 动态标题绑定
                       title: ValueListenableBuilder<Set<int>>(
                         valueListenable: _selectedIdsNotifier,
                         builder: (context, selectedIds, child) {
                           return Text(
-                            _isSelectingMode ? '已选择 ${selectedIds.length} 项' : 'Aura',
-                            style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF1A1A1A), letterSpacing: 1.2),
+                            _isSelectingMode
+                                ? '已选择 ${selectedIds.length} 项'
+                                : widget.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF1A1A1A),
+                              letterSpacing: 1.2,
+                            ),
                           );
-                        }
+                        },
                       ),
                     ),
-                    actions:[
+                    actions: [
                       if (_isSelectingMode)
                         ValueListenableBuilder<Set<int>>(
                           valueListenable: _selectedIdsNotifier,
                           builder: (context, selectedIds, _) {
                             return TextButton(
                               onPressed: _toggleSelectAll,
-                              child: Text(selectedIds.length == _photos.length ? '取消全选' : '全选', style: const TextStyle(color: Color(0xFFE70FAD), fontWeight: FontWeight.bold)),
+                              child: Text(
+                                selectedIds.length == _photos.length
+                                    ? '取消全选'
+                                    : '全选',
+                                style: const TextStyle(
+                                  color: Color(0xFFE70FAD),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             );
-                          }
+                          },
                         )
                       else ...[
                         Stack(
                           alignment: Alignment.center,
-                          children:[
-                            IconButton(icon: Icon(LucideIcons.listFilter, size: 26, color: _filterOptions.isEmpty ? const Color(0xFF1A1A1A) : const Color(0xFFE70FAD)), onPressed: _openFilterPanel),
-                            if (!_filterOptions.isEmpty) 
-                              Positioned(top: 10, right: 10, child: Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFFE70FAD), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5))))
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                LucideIcons.listFilter,
+                                size: 26,
+                                color: _filterOptions.isEmpty
+                                    ? const Color(0xFF1A1A1A)
+                                    : const Color(0xFFE70FAD),
+                              ),
+                              onPressed: _openFilterPanel,
+                            ),
+                            if (!_filterOptions.isEmpty)
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE70FAD),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: IconButton(
-                            icon: const Icon(LucideIcons.plusCircle, size: 28, color: Color(0xFFE70FAD)),
-                            onPressed: () async { 
-                              int count = await PhotoImportEngine.importFromSystemGallery(targetAlbumId: widget.albumId); 
+                            icon: const Icon(
+                              LucideIcons.plusCircle,
+                              size: 28,
+                              color: Color(0xFFE70FAD),
+                            ),
+                            onPressed: () async {
+                              int count =
+                                  await PhotoImportEngine.importFromSystemGallery(
+                                    targetAlbumId: widget.albumId,
+                                  );
                               if (count > 0) {
                                 _loadPhotos();
                                 if (mounted) {
                                   // 🚀 升级为高级导入提示条
-                                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                  ScaffoldMessenger.of(
+                                    context,
+                                  ).hideCurrentSnackBar();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       elevation: 0,
                                       behavior: SnackBarBehavior.floating,
-                                      margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      margin: const EdgeInsets.only(
+                                        bottom: 100,
+                                        left: 20,
+                                        right: 20,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
                                       backgroundColor: const Color(0xFF2C2C2E),
                                       content: Row(
-                                        children:[
-                                          const Icon(LucideIcons.checkCircle2, color: Color(0xFFE70FAD), size: 20),
+                                        children: [
+                                          const Icon(
+                                            LucideIcons.checkCircle2,
+                                            color: Color(0xFFE70FAD),
+                                            size: 20,
+                                          ),
                                           const SizedBox(width: 12),
-                                          Text('成功导入 $count 张照片', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                                          Text(
+                                            '成功导入 $count 张照片',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
                                         ],
                                       ),
                                       duration: const Duration(seconds: 3),
@@ -460,20 +676,24 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
                               }
                             },
                           ),
-                        )
-                      ]
+                        ),
+                      ],
                     ],
                   ),
                 ];
               },
               // 画廊内容区
-              body: _isLoading 
-                  ? const Center(child: CircularProgressIndicator(color: Color(0xFFE70FAD)))
-                  : _photos.isEmpty 
-                      ? _buildEmptyState() 
-                      : _buildGalleryGrid(),
+              body: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFFE70FAD),
+                      ),
+                    )
+                  : _photos.isEmpty
+                  ? _buildEmptyState()
+                  : _buildGalleryGrid(),
             ),
-                    
+
             // 底部多选操作栏
             AnimatedPositioned(
               duration: const Duration(milliseconds: 350),
@@ -490,12 +710,32 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
   }
 
   Widget _buildEmptyState() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children:[Icon(LucideIcons.imageOff, size: 64, color: Colors.grey.shade300), const SizedBox(height: 16), Text(_filterOptions.isEmpty ? '沙盒空空如也' : '无符合筛选条件的照片', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey.shade400))]));
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(LucideIcons.imageOff, size: 64, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          Text(
+            _filterOptions.isEmpty ? '沙盒空空如也' : '无符合筛选条件的照片',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade400,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildGalleryGrid() {
     final int currentCols = _columnLevels[_currentColIndex];
-    final double spacing = currentCols >= 8 ? 0.5 : (currentCols == 4 || currentCols == 5) ? 1.0 : 4.0;
+    final double spacing = currentCols >= 8
+        ? 0.5
+        : (currentCols == 4 || currentCols == 5)
+        ? 1.0
+        : 4.0;
     final double horizontalPadding = currentCols >= 4 ? 0.0 : 4.0;
     final double borderRadius = currentCols >= 4 ? 0.0 : (36.0 / currentCols);
 
@@ -510,24 +750,41 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
             final int end = math.max(_dragStartIndex!, index);
             for (int i = start; i <= end; i++) {
               final id = _photos[i].id;
-              if (_dragSelectModeIsSelecting) newSet.add(id); else newSet.remove(id);
+              if (_dragSelectModeIsSelecting)
+                newSet.add(id);
+              else
+                newSet.remove(id);
             }
-            if (newSet.length != _selectedIdsNotifier.value.length || !newSet.containsAll(_selectedIdsNotifier.value)) {
+            if (newSet.length != _selectedIdsNotifier.value.length ||
+                !newSet.containsAll(_selectedIdsNotifier.value)) {
               _selectedIdsNotifier.value = newSet;
               HapticFeedback.selectionClick();
             }
           }
         }
       },
-      onPointerUp: (_) { _isDragSelecting = false; _dragStartIndex = null; _dragCurrentIndex = null; },
+      onPointerUp: (_) {
+        _isDragSelecting = false;
+        _dragStartIndex = null;
+        _dragCurrentIndex = null;
+      },
       child: GestureDetector(
-        onScaleStart: (details) { if (!_isSelectingMode && details.pointerCount >= 2) _baseColIndex = _currentColIndex; },
+        onScaleStart: (details) {
+          if (!_isSelectingMode && details.pointerCount >= 2)
+            _baseColIndex = _currentColIndex;
+        },
         onScaleUpdate: (details) {
           if (!_isSelectingMode && details.pointerCount >= 2) {
             double scale = details.scale;
             int offset = -(math.log(scale) / math.ln2).round();
-            int newIndex = (_baseColIndex + offset).clamp(0, _columnLevels.length - 1);
-            if (newIndex != _currentColIndex) { setState(() => _currentColIndex = newIndex); HapticFeedback.selectionClick(); }
+            int newIndex = (_baseColIndex + offset).clamp(
+              0,
+              _columnLevels.length - 1,
+            );
+            if (newIndex != _currentColIndex) {
+              setState(() => _currentColIndex = newIndex);
+              HapticFeedback.selectionClick();
+            }
           }
         },
         // 🚀 核心：使用 NotificationListener 拦截 NestedScrollView 内部网格的滚动事件
@@ -539,13 +796,24 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
           child: GridView.builder(
             key: ValueKey<int>(currentCols),
             // 注意：移除了 controller，让它自动使用 NestedScrollView 注入的 PrimaryScrollController
-            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: EdgeInsets.only(left: horizontalPadding, right: horizontalPadding, bottom: _isSelectingMode ? 120 : 100, top: 8),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: currentCols, mainAxisSpacing: spacing, crossAxisSpacing: spacing),
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            padding: EdgeInsets.only(
+              left: horizontalPadding,
+              right: horizontalPadding,
+              bottom: _isSelectingMode ? 120 : 100,
+              top: 8,
+            ),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: currentCols,
+              mainAxisSpacing: spacing,
+              crossAxisSpacing: spacing,
+            ),
             itemCount: _photos.length,
             itemBuilder: (context, index) {
               final photo = _photos[index];
-              final double checkSize = currentCols >= 5 ? 14.0 : 24.0; 
+              final double checkSize = currentCols >= 5 ? 14.0 : 24.0;
 
               return ValueListenableBuilder<Set<int>>(
                 valueListenable: _selectedIdsNotifier,
@@ -553,25 +821,63 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
                   final bool isSelected = selectedIds.contains(photo.id);
 
                   return _PhotoItem(
-                    photo: photo, borderRadius: borderRadius, isSelectingMode: _isSelectingMode, isSelected: isSelected, checkSize: checkSize, currentCols: currentCols,
+                    photo: photo,
+                    borderRadius: borderRadius,
+                    isSelectingMode: _isSelectingMode,
+                    isSelected: isSelected,
+                    checkSize: checkSize,
+                    currentCols: currentCols,
                     onLongPress: () => _enterSelection(photo.id), // 🚀 触发全局状态
                     onTapImage: () {
-                      Navigator.push(context, PageRouteBuilder(transitionDuration: const Duration(milliseconds: 300), pageBuilder: (_, __, ___) => PhotoPreviewPage(photos: _photos, initialIndex: index, multiSelectNotifier: _isSelectingMode ? _selectedIdsNotifier : null), transitionsBuilder: (_, animation, __, child) { return FadeTransition(opacity: animation, child: child); }));
+                      Navigator.push(
+                        context,
+                        PageRouteBuilder(
+                          transitionDuration: const Duration(milliseconds: 300),
+                          pageBuilder: (_, __, ___) => PhotoPreviewPage(
+                            photos: _photos,
+                            initialIndex: index,
+                            multiSelectNotifier: _isSelectingMode
+                                ? _selectedIdsNotifier
+                                : null,
+                          ),
+                          transitionsBuilder: (_, animation, __, child) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            );
+                          },
+                        ),
+                      );
                     },
                     onTapCheckbox: () {
                       HapticFeedback.selectionClick();
-                      final currentSet = Set<int>.from(_selectedIdsNotifier.value);
-                      if (isSelected) currentSet.remove(photo.id); else currentSet.add(photo.id);
+                      final currentSet = Set<int>.from(
+                        _selectedIdsNotifier.value,
+                      );
+                      if (isSelected)
+                        currentSet.remove(photo.id);
+                      else
+                        currentSet.add(photo.id);
                       _selectedIdsNotifier.value = currentSet;
                     },
                     onLongPressCheckboxStart: () {
-                      HapticFeedback.lightImpact(); _isDragSelecting = true; _dragStartIndex = index; _dragCurrentIndex = index; _preDragSelectedIds = Set.from(_selectedIdsNotifier.value); _dragSelectModeIsSelecting = !isSelected;
+                      HapticFeedback.lightImpact();
+                      _isDragSelecting = true;
+                      _dragStartIndex = index;
+                      _dragCurrentIndex = index;
+                      _preDragSelectedIds = Set.from(
+                        _selectedIdsNotifier.value,
+                      );
+                      _dragSelectModeIsSelecting = !isSelected;
                       final currentSet = Set<int>.from(_preDragSelectedIds);
-                      if (_dragSelectModeIsSelecting) currentSet.add(photo.id); else currentSet.remove(photo.id);
+                      if (_dragSelectModeIsSelecting)
+                        currentSet.add(photo.id);
+                      else
+                        currentSet.remove(photo.id);
                       _selectedIdsNotifier.value = currentSet;
                     },
                   );
-                }
+                },
               );
             },
           ),
@@ -582,33 +888,69 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
 
   Widget _buildSelectionBottomBar() {
     return Container(
-      padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).padding.bottom + 16),
-      decoration: BoxDecoration(color: const Color(0xFFF6F6F8), boxShadow:[BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -5))], borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
+      padding: EdgeInsets.only(
+        left: 0,
+        right: 0,
+        top: 16,
+        bottom: MediaQuery.of(context).padding.bottom + 16,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F6F8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children:[
-          _buildBottomAction(LucideIcons.folderPlus, "相册", onTap: _openAddToAlbumPanel),
+        children: [
+          _buildBottomAction(
+            LucideIcons.folderPlus,
+            "相册",
+            onTap: _openAddToAlbumPanel,
+          ),
           _buildBottomAction(LucideIcons.tag, "标签"),
           _buildBottomAction(LucideIcons.star, "评分"),
           // 🚀 关联删除处理函数
-          _buildBottomAction(LucideIcons.trash2, "删除", color: Colors.redAccent, onTap: _handleDeleteSelected),
+          _buildBottomAction(
+            LucideIcons.trash2,
+            "删除",
+            color: Colors.redAccent,
+            onTap: _handleDeleteSelected,
+          ),
           _buildBottomAction(LucideIcons.share, "分享"),
         ],
       ),
     );
   }
 
-  Widget _buildBottomAction(IconData icon, String label, {Color? color, VoidCallback? onTap}) {
+  Widget _buildBottomAction(
+    IconData icon,
+    String label, {
+    Color? color,
+    VoidCallback? onTap,
+  }) {
     return GestureDetector(
       onTap: onTap, // 🚀 绑定点击事件
       behavior: HitTestBehavior.opaque,
       child: Column(
-        mainAxisSize: MainAxisSize.min, 
-        children:[
-          Icon(icon, color: color ?? const Color(0xFF1A1A1A), size: 24), 
-          const SizedBox(height: 6), 
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color ?? Colors.grey.shade800))
-        ]
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color ?? const Color(0xFF1A1A1A), size: 24),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color ?? Colors.grey.shade800,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -616,25 +958,120 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
 
 // _PhotoItem 保持完全不变
 class _PhotoItem extends StatefulWidget {
-  final ImageModel photo; final double borderRadius; final bool isSelectingMode; final bool isSelected; final double checkSize; final int currentCols; final VoidCallback onLongPress; final VoidCallback onTapImage; final VoidCallback onTapCheckbox; final VoidCallback onLongPressCheckboxStart;
-  const _PhotoItem({required this.photo, required this.borderRadius, required this.isSelectingMode, required this.isSelected, required this.checkSize, required this.currentCols, required this.onLongPress, required this.onTapImage, required this.onTapCheckbox, required this.onLongPressCheckboxStart});
-  @override State<_PhotoItem> createState() => _PhotoItemState();
+  final ImageModel photo;
+  final double borderRadius;
+  final bool isSelectingMode;
+  final bool isSelected;
+  final double checkSize;
+  final int currentCols;
+  final VoidCallback onLongPress;
+  final VoidCallback onTapImage;
+  final VoidCallback onTapCheckbox;
+  final VoidCallback onLongPressCheckboxStart;
+  const _PhotoItem({
+    required this.photo,
+    required this.borderRadius,
+    required this.isSelectingMode,
+    required this.isSelected,
+    required this.checkSize,
+    required this.currentCols,
+    required this.onLongPress,
+    required this.onTapImage,
+    required this.onTapCheckbox,
+    required this.onLongPressCheckboxStart,
+  });
+  @override
+  State<_PhotoItem> createState() => _PhotoItemState();
 }
 
 class _PhotoItemState extends State<_PhotoItem> {
   bool _isPressed = false;
-  @override Widget build(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) => setState(() => _isPressed = true), onTapUp: (_) => setState(() => _isPressed = false), onTapCancel: () => setState(() => _isPressed = false),
-      onLongPress: () { setState(() => _isPressed = false); widget.onLongPress(); }, onTap: widget.onTapImage,
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onLongPress: () {
+        setState(() => _isPressed = false);
+        widget.onLongPress();
+      },
+      onTap: widget.onTapImage,
       child: AnimatedScale(
-        scale: _isPressed ? 0.93 : 1.0, duration: const Duration(milliseconds: 150), curve: Curves.easeOutCubic,
+        scale: _isPressed ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOutCubic,
         child: Stack(
           fit: StackFit.expand,
-          children:[
-            Hero(tag: widget.photo.path, child: ClipRRect(borderRadius: BorderRadius.circular(widget.borderRadius), child: ExtendedImage.file(File(widget.photo.path), fit: BoxFit.cover, enableMemoryCache: true, clearMemoryCacheWhenDispose: false, cacheWidth: 300))),
-            if (widget.isSelected) Container(decoration: BoxDecoration(color: Colors.black.withOpacity(0.3), borderRadius: BorderRadius.circular(widget.borderRadius), border: Border.all(color: const Color(0xFFE70FAD), width: widget.currentCols >= 5 ? 1 : 3))),
-            if (widget.isSelectingMode) Positioned(right: widget.currentCols >= 5 ? 4 : 8, top: widget.currentCols >= 5 ? 4 : 8, child: GestureDetector(onTap: widget.onTapCheckbox, onLongPressStart: (_) => widget.onLongPressCheckboxStart(), behavior: HitTestBehavior.opaque, child: Padding(padding: const EdgeInsets.all(4.0), child: AnimatedContainer(duration: const Duration(milliseconds: 200), width: widget.checkSize, height: widget.checkSize, decoration: BoxDecoration(color: widget.isSelected ? const Color(0xFFE70FAD) : Colors.black.withOpacity(0.2), borderRadius: BorderRadius.circular(widget.checkSize / 2.5), border: Border.all(color: Colors.white, width: widget.currentCols >= 5 ? 1 : 2), boxShadow:[if (!widget.isSelected) BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4)]), child: widget.isSelected && widget.currentCols < 5 ? const Icon(LucideIcons.check, size: 16, color: Colors.white) : null)))),
+          children: [
+            Hero(
+              tag: widget.photo.path,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(widget.borderRadius),
+                child: ExtendedImage.file(
+                  File(widget.photo.path),
+                  fit: BoxFit.cover,
+                  enableMemoryCache: true,
+                  clearMemoryCacheWhenDispose: false,
+                  cacheWidth: 300,
+                ),
+              ),
+            ),
+            if (widget.isSelected)
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(widget.borderRadius),
+                  border: Border.all(
+                    color: const Color(0xFFE70FAD),
+                    width: widget.currentCols >= 5 ? 1 : 3,
+                  ),
+                ),
+              ),
+            if (widget.isSelectingMode)
+              Positioned(
+                right: widget.currentCols >= 5 ? 4 : 8,
+                top: widget.currentCols >= 5 ? 4 : 8,
+                child: GestureDetector(
+                  onTap: widget.onTapCheckbox,
+                  onLongPressStart: (_) => widget.onLongPressCheckboxStart(),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: widget.checkSize,
+                      height: widget.checkSize,
+                      decoration: BoxDecoration(
+                        color: widget.isSelected
+                            ? const Color(0xFFE70FAD)
+                            : Colors.black.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(
+                          widget.checkSize / 2.5,
+                        ),
+                        border: Border.all(
+                          color: Colors.white,
+                          width: widget.currentCols >= 5 ? 1 : 2,
+                        ),
+                        boxShadow: [
+                          if (!widget.isSelected)
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 4,
+                            ),
+                        ],
+                      ),
+                      child: widget.isSelected && widget.currentCols < 5
+                          ? const Icon(
+                              LucideIcons.check,
+                              size: 16,
+                              color: Colors.white,
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

@@ -1,68 +1,144 @@
 import 'dart:io';
-import 'package:image_picker/image_picker.dart'; // 🚀 引入原生多选器
+import 'dart:ui' as ui;
+import 'package:flutter/painting.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../data/isar_service.dart';
 import '../../data/models/image_model.dart';
 
 class PhotoImportEngine {
-  // 🚀 全新的原生多图导入引擎 (返回成功导入的数量)
   static Future<int> importFromSystemGallery({int? targetAlbumId}) async {
     try {
       print("🚀[Aura引擎] 呼叫系统原生多选相册...");
-      
+
       final ImagePicker picker = ImagePicker();
-      // 1. 唤起手机系统原生的极速照片选择器 (支持滑动多选)
       final List<XFile> selectedImages = await picker.pickMultiImage();
-      
+
       if (selectedImages.isEmpty) {
-        print("⚠️ [Aura引擎] 用户取消了选择");
-        return 0; 
+        print("⚠️[Aura引擎] 用户取消了选择");
+        return 0;
       }
 
-      int successCount = 0;
       final Directory appDir = await getApplicationSupportDirectory();
+      List<ImageModel> newModels = [];
 
-      // 2. 开启极速数据库批量写入事务
-      await IsarService.db.writeTxn(() async {
-        for (var xfile in selectedImages) {
-          final File originFile = File(xfile.path);
-          
-          // 3. 构建极其安全的绝对唯一物理沙盒路径
-          final String fileName = "aura_${DateTime.now().microsecondsSinceEpoch}_${xfile.name}";
-          final String sandboxPath = "${appDir.path}/$fileName";
-
-          // 4. 物理拷贝：真正实现系统相册到 Aura 的隐私隔离
-          await originFile.copy(sandboxPath);
-
-          // 5. 发放 Aura 数据库身份证
-          final imageModel = ImageModel()
-            ..path = sandboxPath
-            ..filename = fileName
-            ..extension = xfile.name.split('.').last.toLowerCase()
-            ..sizeBytes = await originFile.length()
-            // 宽高设为 0，我们的 ExtendedImage 渲染引擎会自动自适应
-            ..width = 0 
-            ..height = 0
-            ..addedTime = DateTime.now()
-            ..createdTime = DateTime.now() // 原生选择器不提供创建时间，统一使用添加时间
-            ..modifiedTime = DateTime.now()
-            ..rating = 0
-            ..tags =[]
-            // 🚀 如果传入了相册ID，直接关联进该相册！
-            ..albumIds = targetAlbumId != null ?[targetAlbumId] :[]; 
-
-          // 6. 极速落盘
-          await IsarService.db.imageModels.put(imageModel);
-          successCount++;
+      for (var xfile in selectedImages) {
+        final File originFile = File(xfile.path);
+        
+        // 检查文件是否存在
+        if (!await originFile.exists()) {
+          print("⚠️ 文件不存在: ${xfile.path}");
+          continue;
         }
+
+        final bytes = await originFile.readAsBytes();
+
+        int width = 0;
+        int height = 0;
+
+        try {
+          final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+          final descriptor = await ui.ImageDescriptor.encoded(buffer);
+          width = descriptor.width;
+          height = descriptor.height;
+          descriptor.dispose();
+          buffer.dispose();
+          print("📐 解析尺寸: ${xfile.name} -> ${width}x${height}");
+        } catch (e) {
+          print("⚠️ 尺寸解析失败: ${xfile.name}, 错误: $e");
+        }
+
+        // 保留原始文件名
+        final String originalFilename = xfile.name;
+        final String originalPath = xfile.path;
+        final String extension = originalFilename.split('.').last.toLowerCase();
+        
+        // 使用原始文件名作为存储文件名
+        final String sandboxPath = "${appDir.path}/$originalFilename";
+        
+        // 检查是否已存在同名文件，如果存在则添加时间戳
+        String finalPath = sandboxPath;
+        String finalFilename = originalFilename;
+        if (await File(sandboxPath).exists()) {
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          finalFilename = "${originalFilename.split('.').first}_$timestamp.$extension";
+          finalPath = "${appDir.path}/$finalFilename";
+        }
+
+        // 移动文件（而非复制）
+        try {
+          await originFile.rename(finalPath);
+        } catch (e) {
+          // 如果跨文件系统移动失败，则复制后删除
+          await originFile.copy(finalPath);
+          await originFile.delete();
+        }
+
+        // 获取文件的实际创建时间（如果可能）
+        DateTime createdTime = DateTime.now();
+        try {
+          final stat = await FileStat.stat(finalPath);
+          if (stat.modified != null) {
+            createdTime = stat.modified;
+          }
+        } catch (e) {
+          print("⚠️ 无法获取文件时间: $e");
+        }
+
+        // 检测是否为截图
+        String? sourceApp;
+        final nameLower = originalFilename.toLowerCase();
+        final pathLower = originalPath.toLowerCase();
+        if (nameLower.contains('screenshot') || 
+            nameLower.contains('截屏') || 
+            nameLower.contains('截图') ||
+            pathLower.contains('screenshot')) {
+          // 尝试从路径提取来源应用信息
+          sourceApp = _extractSourceAppFromPath(originalPath);
+        }
+
+        final imageModel = ImageModel()
+          ..path = finalPath
+          ..filename = finalFilename
+          ..extension = extension
+          ..originalFilename = originalFilename
+          ..originalPath = originalPath
+          ..sourceApp = sourceApp
+          ..sizeBytes = bytes.length
+          ..width = width
+          ..height = height
+          ..addedTime = DateTime.now()
+          ..createdTime = createdTime
+          ..modifiedTime = DateTime.now()
+          ..rating = 0
+          ..tags = []
+          ..albumIds = targetAlbumId != null ? [targetAlbumId] : [];
+
+        newModels.add(imageModel);
+      }
+
+      await IsarService.db.writeTxn(() async {
+        await IsarService.db.imageModels.putAll(newModels);
       });
 
-      print("✅ [Aura引擎] 成功吸入并隔离 $successCount 张照片！");
-      return successCount;
-
+      print("✅[Aura引擎] 成功导入 ${newModels.length} 张照片！");
+      return newModels.length;
     } catch (e) {
-      print("❌ [Aura引擎] 致命报错: $e");
+      print("❌ 导入失败: $e");
       return 0;
     }
+  }
+
+  static String? _extractSourceAppFromPath(String path) {
+    // Android 截图路径通常包含包名
+    // 例如: /storage/emulated/0/Pictures/Screenshots/com.example.app/
+    final parts = path.split('/');
+    for (var part in parts) {
+      if (part.contains('.') && part.split('.').length >= 2) {
+        // 可能是包名格式
+        return part;
+      }
+    }
+    return null;
   }
 }
