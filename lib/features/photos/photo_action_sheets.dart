@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../data/isar_service.dart';
 import '../../data/models/image_model.dart';
+import '../../core/globals.dart'; // 全局状态
 import 'photo_gallery_view.dart';
 
 class PhotoActionSheets {
@@ -195,12 +196,26 @@ class PhotoActionSheets {
 
     if (albums.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            '你还没有自定义相册，请先去相册页新建',
-            style: TextStyle(color: Colors.white),
+        SnackBar(
+          elevation: 0,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          backgroundColor: Colors.orange,
+          backgroundColor: const Color(0xFF2C2C2E),
+          content: const Row(
+            children: [
+              Icon(LucideIcons.alertCircle, color: Colors.orange, size: 20),
+              SizedBox(width: 12),
+              Text(
+                '你还没有自定义相册，请先去相册页新建',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 4),
+          dismissDirection: DismissDirection.horizontal,
         ),
       );
       return;
@@ -210,202 +225,230 @@ class PhotoActionSheets {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (sheetContext) => Container(
-        padding: const EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 12,
-          bottom: 40,
+      builder: (sheetContext) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
         ),
-        decoration: const BoxDecoration(
-          color: Color(0xFFF6F6F8),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(10),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF6F6F8),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 固定头部
+                Container(
+                  padding: const EdgeInsets.only(
+                    left: 24,
+                    right: 24,
+                    top: 12,
+                    bottom: 8,
+                  ),
+                  child: Column(
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "加入相册",
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF1A1A1A),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                "装入相册",
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF1A1A1A),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...albums.map(
-                (album) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                // 可滚动的相册列表
+                Flexible(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.only(
+                      left: 24,
+                      right: 24,
+                      bottom: 24,
                     ),
-                    child: const Icon(
-                      LucideIcons.image,
-                      color: Color(0xFFE70FAD),
-                    ),
-                  ),
-                  title: Text(
-                    album.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  onTap: () async {
-                    HapticFeedback.selectionClick();
-                    Navigator.pop(sheetContext);
-
-                    // 检查哪些照片已在目标相册中
-                    final existingIds = <int>[];
-                    final newIds = <int>[];
-                    for (final photoId in photoIds) {
-                      final isInAlbum = await IsarService.isPhotoInAlbum(
-                        photoId,
-                        album.id,
-                      );
-                      if (isInAlbum) {
-                        existingIds.add(photoId);
-                      } else {
-                        newIds.add(photoId);
-                      }
-                    }
-
-                    if (newIds.isEmpty) {
-                      // 所有照片都已在相册中
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            elevation: 0,
-                            behavior: SnackBarBehavior.floating,
-                            margin: const EdgeInsets.only(
-                              bottom: 100,
-                              left: 20,
-                              right: 20,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            backgroundColor: Colors.orange,
-                            content: Row(
-                              children: [
-                                const Icon(
-                                  LucideIcons.alertCircle,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    existingIds.length == 1
-                                        ? '图片已存在于「${album.name}」中'
-                                        : '所选 ${photoIds.length} 张图片已全部存在于「${album.name}」中',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            duration: const Duration(seconds: 2),
+                    itemCount: albums.length,
+                    itemBuilder: (_, index) {
+                      final album = albums[index];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        );
-                      }
-                      return;
-                    }
-
-                    // 添加新照片到相册
-                    await IsarService.addPhotosToAlbum(newIds, album.id);
-                    onUpdate();
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
-                      // 如果有部分照片已存在，显示不同的提示
-                      final message = existingIds.isEmpty
-                          ? '已装入「${album.name}」'
-                          : '已装入 ${newIds.length} 张到「${album.name}」\n${existingIds.length} 张已存在';
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          elevation: 0,
-                          behavior: SnackBarBehavior.floating,
-                          margin: const EdgeInsets.only(
-                            bottom: 100,
-                            left: 20,
-                            right: 20,
+                          child: const Icon(
+                            LucideIcons.image,
+                            color: Color(0xFFE70FAD),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                        ),
+                        title: Text(
+                          album.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 16,
                           ),
-                          backgroundColor: const Color(0xFF2C2C2E),
-                          content: Row(
-                            children: [
-                              const Icon(
-                                LucideIcons.checkCircle2,
-                                color: Color(0xFFE70FAD),
-                                size: 20,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  message,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 2,
-                                ),
-                              ),
-                            ],
-                          ),
-                          action: SnackBarAction(
-                            label: '去查看',
-                            textColor: const Color(0xFFE70FAD),
-                            onPressed: () {
+                        ),
+                        onTap: () async {
+                          HapticFeedback.selectionClick();
+                          Navigator.pop(sheetContext);
+
+                          // 检查哪些照片已在目标相册中
+                          final existingIds = <int>[];
+                          final newIds = <int>[];
+                          for (final photoId in photoIds) {
+                            final isInAlbum = await IsarService.isPhotoInAlbum(
+                              photoId,
+                              album.id,
+                            );
+                            if (isInAlbum) {
+                              existingIds.add(photoId);
+                            } else {
+                              newIds.add(photoId);
+                            }
+                          }
+
+                          if (newIds.isEmpty) {
+                            // 所有照片都已在相册中
+                            if (context.mounted) {
                               ScaffoldMessenger.of(
                                 context,
                               ).hideCurrentSnackBar();
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => PhotoGalleryView(
-                                    title: album.name,
-                                    albumId: album.id,
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  elevation: 0,
+                                  behavior: SnackBarBehavior.floating,
+                                  margin: const EdgeInsets.only(
+                                    bottom: 100,
+                                    left: 20,
+                                    right: 20,
                                   ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  backgroundColor: Colors.orange,
+                                  content: Row(
+                                    children: [
+                                      const Icon(
+                                        LucideIcons.alertCircle,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          existingIds.length == 1
+                                              ? '图片已存在于「${album.name}」中'
+                                              : '所选 ${photoIds.length} 张图片已全部存在于「${album.name}」中',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  duration: const Duration(seconds: 4),
+                                  dismissDirection: DismissDirection.horizontal,
                                 ),
                               );
-                            },
-                          ),
-                          duration: const Duration(seconds: 2),
-                        ),
+                            }
+                            return;
+                          }
+
+                          // 添加新照片到相册
+                          await IsarService.addPhotosToAlbum(newIds, album.id);
+                          onUpdate();
+                          globalAlbumRefreshNotifier.value = true; // 通知相册页刷新
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+                            // 如果有部分照片已存在，显示不同的提示
+                            final message = existingIds.isEmpty
+                                ? '已装入「${album.name}」'
+                                : '已装入 ${newIds.length} 张到「${album.name}」\n${existingIds.length} 张已存在';
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                elevation: 0,
+                                behavior: SnackBarBehavior.floating,
+                                margin: const EdgeInsets.only(
+                                  bottom: 100,
+                                  left: 20,
+                                  right: 20,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                backgroundColor: const Color(0xFF2C2C2E),
+                                content: Row(
+                                  children: [
+                                    const Icon(
+                                      LucideIcons.checkCircle2,
+                                      color: Color(0xFFE70FAD),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        message,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                action: SnackBarAction(
+                                  label: '去查看',
+                                  textColor: const Color(0xFFE70FAD),
+                                  onPressed: () {
+                                    ScaffoldMessenger.of(
+                                      context,
+                                    ).hideCurrentSnackBar();
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => PhotoGalleryView(
+                                          title: album.name,
+                                          albumId: album.id,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                duration: const Duration(seconds: 4),
+                                dismissDirection: DismissDirection.horizontal,
+                              ),
+                            );
+                          }
+                        },
                       );
-                    }
-                  },
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

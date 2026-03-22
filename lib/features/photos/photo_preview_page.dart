@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/image_model.dart';
 import '../../data/isar_service.dart';
 import 'photo_action_sheets.dart';
@@ -31,10 +32,14 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
   late ExtendedPageController _pageController;
   late int _currentIndex;
   bool _isImmersive = false;
+  bool _isFullImmersive = false;
 
   late AnimationController _doubleClickAnimationController;
   Animation<double>? _doubleClickAnimation;
   late void Function() _doubleClickAnimationListener;
+
+  bool _isLongPressingPrev = false;
+  bool _isLongPressingNext = false;
 
   bool get _isSimplifiedMode => widget.multiSelectNotifier != null;
 
@@ -63,6 +68,79 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
     }
   }
 
+  void _enterFullImmersive() {
+    if (!_isSimplifiedMode) {
+      final currentIndex = _currentIndex;
+      setState(() {
+        _isFullImmersive = true;
+        _isImmersive = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _pageController.jumpToPage(currentIndex);
+        }
+      });
+    }
+  }
+
+  void _exitFullImmersive() {
+    final currentIndex = _currentIndex;
+    setState(() => _isFullImmersive = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _pageController.jumpToPage(currentIndex);
+      }
+    });
+  }
+
+  void _goToPreviousPhoto() {
+    if (_currentIndex > 0) {
+      final targetIndex = _currentIndex - 1;
+      _pageController.jumpToPage(targetIndex);
+      setState(() => _currentIndex = targetIndex);
+    }
+  }
+
+  void _goToNextPhoto() {
+    if (_currentIndex < widget.photos.length - 1) {
+      final targetIndex = _currentIndex + 1;
+      _pageController.jumpToPage(targetIndex);
+      setState(() => _currentIndex = targetIndex);
+    }
+  }
+
+  void _startLongPressPrev() {
+    _isLongPressingPrev = true;
+    _continuousPrevSwitch();
+  }
+
+  void _stopLongPressPrev() {
+    _isLongPressingPrev = false;
+  }
+
+  void _continuousPrevSwitch() async {
+    while (_isLongPressingPrev && _currentIndex > 0) {
+      _goToPreviousPhoto();
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+  }
+
+  void _startLongPressNext() {
+    _isLongPressingNext = true;
+    _continuousNextSwitch();
+  }
+
+  void _stopLongPressNext() {
+    _isLongPressingNext = false;
+  }
+
+  void _continuousNextSwitch() async {
+    while (_isLongPressingNext && _currentIndex < widget.photos.length - 1) {
+      _goToNextPhoto();
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+  }
+
   void _showRatingSheet(ImageModel photo) {
     PhotoActionSheets.showRatingSheet(
       context: context,
@@ -84,6 +162,174 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
       context: context,
       photoIds: [photo.id],
       onUpdate: () => setState(() {}),
+    );
+  }
+
+  // ==========================================
+  // 🚀 更多菜单
+  // ==========================================
+  void _showMoreMenuSheet(ImageModel photo) {
+    HapticFeedback.lightImpact();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF6F6F8),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.only(top: 12, bottom: 8),
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Column(
+                    children: [
+                      _buildMoreMenuItem(
+                        icon: LucideIcons.share2,
+                        label: "分享",
+                        onTap: () {
+                          Navigator.pop(context);
+                          _sharePhoto(photo);
+                        },
+                      ),
+                      _buildMoreMenuItem(
+                        icon: LucideIcons.image,
+                        label: "设置为壁纸",
+                        onTap: () {
+                          Navigator.pop(context);
+                          _setAsWallpaper(photo);
+                        },
+                      ),
+                      _buildMoreMenuItem(
+                        icon: LucideIcons.maximize2,
+                        label: "沉浸式查看",
+                        onTap: () {
+                          Navigator.pop(context);
+                          _enterFullImmersive();
+                        },
+                      ),
+                      _buildMoreMenuItem(
+                        icon: LucideIcons.info,
+                        label: "详细信息",
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showMoreDetailsSheet(photo);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMoreMenuItem({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 22, color: const Color(0xFF1A1A1A)),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1A1A1A),
+              ),
+            ),
+            const Spacer(),
+            const Icon(LucideIcons.chevronRight, size: 20, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _sharePhoto(ImageModel photo) {
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        elevation: 0,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: const Color(0xFF2C2C2E),
+        content: const Row(
+          children: [
+            Icon(LucideIcons.info, color: Color(0xFFE70FAD), size: 20),
+            SizedBox(width: 12),
+            Text(
+              '分享功能开发中...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+        dismissDirection: DismissDirection.horizontal,
+      ),
+    );
+  }
+
+  void _setAsWallpaper(ImageModel photo) {
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        elevation: 0,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: const Color(0xFF2C2C2E),
+        content: const Row(
+          children: [
+            Icon(LucideIcons.info, color: Color(0xFFE70FAD), size: 20),
+            SizedBox(width: 12),
+            Text(
+              '壁纸功能开发中...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+        dismissDirection: DismissDirection.horizontal,
+      ),
     );
   }
 
@@ -215,6 +461,7 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                               "存储位置",
                               photo.path,
                               isPath: true,
+                              onTap: () => _openFileLocation(photo.path),
                             ),
                             if (photo.originalPath != null) ...[
                               const Divider(
@@ -226,6 +473,10 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                                 "原始位置",
                                 photo.originalPath!,
                                 isPath: true,
+                                onTap: () => _openFileLocation(
+                                  photo.originalPath!,
+                                  isOriginalPath: true,
+                                ),
                               ),
                             ],
                             const Divider(height: 24, color: Color(0xFFF0F0F0)),
@@ -292,40 +543,10 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                                 albumNames.join('、'),
                               ),
                             ],
-                            if (photo.rating > 0) ...[
-                              const Divider(
-                                height: 24,
-                                color: Color(0xFFF0F0F0),
-                              ),
-                              _buildDetailRow(
-                                LucideIcons.star,
-                                "评分",
-                                "${photo.rating} 星",
-                              ),
-                            ],
-                            if (photo.tags.isNotEmpty) ...[
-                              const Divider(
-                                height: 24,
-                                color: Color(0xFFF0F0F0),
-                              ),
-                              _buildDetailRow(
-                                LucideIcons.tag,
-                                "标签",
-                                photo.tags.join(', '),
-                              ),
-                            ],
-                            if (photo.description != null &&
-                                photo.description!.isNotEmpty) ...[
-                              const Divider(
-                                height: 24,
-                                color: Color(0xFFF0F0F0),
-                              ),
-                              _buildDetailRow(
-                                LucideIcons.alignLeft,
-                                "描述",
-                                photo.description!,
-                              ),
-                            ],
+                            const Divider(height: 24, color: Color(0xFFF0F0F0)),
+                            _buildEditableRatingRow(photo),
+                            const Divider(height: 24, color: Color(0xFFF0F0F0)),
+                            _buildEditableDescriptionRow(photo),
                           ],
                         ),
                       ),
@@ -338,6 +559,396 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
         );
       },
     );
+  }
+
+  Widget _buildEditableRatingRow(ImageModel photo) {
+    return GestureDetector(
+      onTap: () => _showRatingEditor(photo),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.star, size: 20, color: Colors.grey.shade400),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "评分",
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8E8E93)),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    for (int i = 1; i <= 5; i++)
+                      Icon(
+                        i <= photo.rating ? LucideIcons.star : LucideIcons.star,
+                        size: 20,
+                        color: i <= photo.rating
+                            ? const Color(0xFFE70FAD)
+                            : Colors.grey.shade300,
+                      ),
+                    const SizedBox(width: 8),
+                    const Icon(
+                      LucideIcons.chevronRight,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditableDescriptionRow(ImageModel photo) {
+    return GestureDetector(
+      onTap: () => _showDescriptionEditor(photo),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.alignLeft, size: 20, color: Colors.grey.shade400),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "描述",
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8E8E93)),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        photo.description?.isNotEmpty == true
+                            ? photo.description!
+                            : "点击添加描述",
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: photo.description?.isNotEmpty == true
+                              ? const Color(0xFF1A1A1A)
+                              : Colors.grey.shade400,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(
+                      LucideIcons.chevronRight,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRatingEditor(ImageModel photo) {
+    HapticFeedback.lightImpact();
+    int tempRating = photo.rating;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFFF6F6F8),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+              ),
+              child: SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.only(top: 12, bottom: 8),
+                      child: Center(
+                        child: Container(
+                          width: 40,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        "评分",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (int i = 1; i <= 5; i++)
+                          GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setModalState(() => tempRating = i);
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              child: Icon(
+                                LucideIcons.star,
+                                size: 40,
+                                color: i <= tempRating
+                                    ? const Color(0xFFE70FAD)
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text("取消"),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                Navigator.pop(context);
+                                await _saveRating(photo, tempRating);
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFE70FAD),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text(
+                                "保存",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _saveRating(ImageModel photo, int rating) async {
+    photo.rating = rating;
+    await IsarService.db.writeTxn(() async {
+      await IsarService.db.imageModels.put(photo);
+    });
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          elevation: 0,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          backgroundColor: const Color(0xFF2C2C2E),
+          content: Row(
+            children: [
+              const Icon(
+                LucideIcons.checkCircle2,
+                color: Color(0xFFE70FAD),
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                "评分已更新为 $rating 星",
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 4),
+          dismissDirection: DismissDirection.horizontal,
+        ),
+      );
+    }
+  }
+
+  void _showDescriptionEditor(ImageModel photo) {
+    final controller = TextEditingController(text: photo.description ?? '');
+    HapticFeedback.lightImpact();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF6F6F8),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.only(top: 12, bottom: 8),
+                    child: Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text(
+                      "描述",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        hintText: "添加描述...",
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text("取消"),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              Navigator.pop(context);
+                              await _saveDescription(photo, controller.text);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFE70FAD),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              "保存",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _saveDescription(ImageModel photo, String description) async {
+    photo.description = description.trim().isEmpty ? null : description.trim();
+    await IsarService.db.writeTxn(() async {
+      await IsarService.db.imageModels.put(photo);
+    });
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          elevation: 0,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          backgroundColor: const Color(0xFF2C2C2E),
+          content: const Row(
+            children: [
+              Icon(
+                LucideIcons.checkCircle2,
+                color: Color(0xFFE70FAD),
+                size: 20,
+              ),
+              SizedBox(width: 12),
+              Text(
+                "描述已保存",
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 4),
+          dismissDirection: DismissDirection.horizontal,
+        ),
+      );
+    }
   }
 
   void _showRenameDialog(ImageModel photo) {
@@ -410,12 +1021,37 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                     setState(() {});
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text("已重命名为 $newFilename"),
-                        backgroundColor: const Color(0xFFE70FAD),
+                        elevation: 0,
                         behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                        margin: const EdgeInsets.only(
+                          bottom: 100,
+                          left: 20,
+                          right: 20,
                         ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        backgroundColor: const Color(0xFF2C2C2E),
+                        content: Row(
+                          children: [
+                            const Icon(
+                              LucideIcons.checkCircle2,
+                              color: Color(0xFFE70FAD),
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              "已重命名为 $newFilename",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        duration: const Duration(seconds: 4),
+                        dismissDirection: DismissDirection.horizontal,
                       ),
                     );
                   }
@@ -424,9 +1060,38 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text("重命名失败: $e"),
-                        backgroundColor: Colors.red,
+                        elevation: 0,
                         behavior: SnackBarBehavior.floating,
+                        margin: const EdgeInsets.only(
+                          bottom: 100,
+                          left: 20,
+                          right: 20,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        backgroundColor: const Color(0xFF2C2C2E),
+                        content: Row(
+                          children: [
+                            const Icon(
+                              LucideIcons.alertCircle,
+                              color: Colors.redAccent,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                "重命名失败: $e",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        duration: const Duration(seconds: 4),
+                        dismissDirection: DismissDirection.horizontal,
                       ),
                     );
                   }
@@ -452,40 +1117,273 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
     );
   }
 
+  static const _channel = MethodChannel('com.aura.aura/file_utils');
+
+  Future<void> _openFileLocation(
+    String path, {
+    bool isOriginalPath = false,
+  }) async {
+    final file = File(path);
+
+    if (await file.exists()) {
+      try {
+        if (Platform.isAndroid) {
+          final result = await _channel.invokeMethod<bool>('openFileLocation', {
+            'path': path,
+          });
+          if (result == true) {
+            return;
+          }
+        } else {
+          // iOS/macOS: 使用 url_launcher 打开文件夹
+          final directory = file.parent;
+          final uri = Uri.parse('file://${directory.path}');
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri);
+            return;
+          }
+        }
+      } catch (e) {
+        print("⚠️ 打开文件失败: $e");
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          elevation: 0,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          backgroundColor: const Color(0xFF2C2C2E),
+          content: Row(
+            children: [
+              const Icon(
+                LucideIcons.folderX,
+                color: Colors.redAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  isOriginalPath ? '原始位置在系统相册中，无法直接访问' : '文件不存在或无法打开',
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 4),
+          dismissDirection: DismissDirection.horizontal,
+        ),
+      );
+    }
+  }
+
   Widget _buildDetailRow(
     IconData icon,
     String title,
     String value, {
     bool isPath = false,
+    VoidCallback? onTap,
   }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: Colors.grey.shade400),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF1A1A1A),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.grey.shade400),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                 ),
-                maxLines: isPath ? 3 : 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: onTap != null
+                        ? const Color(0xFFE70FAD)
+                        : const Color(0xFF1A1A1A),
+                  ),
+                  maxLines: isPath ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
+          if (onTap != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Icon(
+                LucideIcons.externalLink,
+                size: 16,
+                color: Colors.grey.shade400,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFullImmersiveView(ImageModel photo) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _exitFullImmersive();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            GestureDetector(
+              onTap: _exitFullImmersive,
+              child: ExtendedImageGesturePageView.builder(
+                controller: _pageController,
+                itemCount: widget.photos.length,
+                physics: const PageScrollPhysics(),
+                onPageChanged: (int index) {
+                  setState(() => _currentIndex = index);
+                },
+                itemBuilder: (BuildContext context, int index) {
+                  final item = widget.photos[index];
+                  return ExtendedImage.file(
+                    File(item.path),
+                    fit: BoxFit.contain,
+                    mode: ExtendedImageMode.gesture,
+                    enableMemoryCache: true,
+                    clearMemoryCacheWhenDispose: false,
+                    loadStateChanged: (ExtendedImageState state) {
+                      if (state.extendedImageLoadState == LoadState.loading) {
+                        return ExtendedImage.file(
+                          File(item.path),
+                          fit: BoxFit.contain,
+                          cacheWidth: 400,
+                          enableLoadState: false,
+                        );
+                      }
+                      return null;
+                    },
+                    initGestureConfigHandler: (state) {
+                      return GestureConfig(
+                        minScale: 0.9,
+                        maxScale: 4.0,
+                        animationMaxScale: 4.5,
+                        speed: 1.0,
+                        inertialSpeed: 150.0,
+                        inPageView: true,
+                      );
+                    },
+                    onDoubleTap: (ExtendedImageGestureState state) {
+                      final pointerDownPosition = state.pointerDownPosition;
+                      final begin = state.gestureDetails?.totalScale ?? 1.0;
+                      final end = begin < 1.5 ? 2.5 : 1.0;
+
+                      _doubleClickAnimation?.removeListener(
+                        _doubleClickAnimationListener,
+                      );
+                      _doubleClickAnimationController.stop();
+                      _doubleClickAnimationController.reset();
+
+                      _doubleClickAnimationListener = () {
+                        state.handleDoubleTap(
+                          scale: _doubleClickAnimation!.value,
+                          doubleTapPosition: pointerDownPosition,
+                        );
+                      };
+
+                      _doubleClickAnimation =
+                          Tween<double>(begin: begin, end: end).animate(
+                            CurvedAnimation(
+                              parent: _doubleClickAnimationController,
+                              curve: Curves.easeInOutCubic,
+                            ),
+                          );
+                      _doubleClickAnimation!.addListener(
+                        _doubleClickAnimationListener,
+                      );
+                      _doubleClickAnimationController.forward();
+                    },
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 24,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _goToPreviousPhoto,
+                        onLongPressStart: (_) => _startLongPressPrev(),
+                        onLongPressEnd: (_) => _stopLongPressPrev(),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.pink.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            LucideIcons.chevronLeft,
+                            size: 28,
+                            color: Colors.pink,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        "${_currentIndex + 1} / ${widget.photos.length}",
+                        style: const TextStyle(
+                          color: Colors.pink,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _goToNextPhoto,
+                        onLongPressStart: (_) => _startLongPressNext(),
+                        onLongPressEnd: (_) => _stopLongPressNext(),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.pink.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            LucideIcons.chevronRight,
+                            size: 28,
+                            color: Colors.pink,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -494,6 +1392,10 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
     if (widget.photos.isEmpty) return const Scaffold();
     final photo = widget.photos[_currentIndex];
 
+    if (_isFullImmersive) {
+      return _buildFullImmersiveView(photo);
+    }
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       color: _isImmersive ? Colors.black : const Color(0xFFF6F6F8),
@@ -501,7 +1403,6 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
         backgroundColor: Colors.transparent,
         body: Stack(
           children: [
-            // 底层核心图片视图
             GestureDetector(
               onTap: _toggleImmersive,
               child: ExtendedImageGesturePageView.builder(
@@ -731,15 +1632,19 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                           color: Colors.redAccent,
                           onTap: () async {
                             HapticFeedback.heavyImpact();
-                            await IsarService.moveToTrash(photo.id);
-                            // 临时交互：删除后退回画廊 (后续可优化为平滑切到下一张)
-                            if (mounted) Navigator.pop(context);
+                            try {
+                              await IsarService.softDeletePhotos([photo.id]);
+                              debugPrint('删除成功: ${photo.id}');
+                              if (mounted) Navigator.pop(context, true);
+                            } catch (e) {
+                              debugPrint('删除失败: $e');
+                            }
                           },
                         ),
                         _buildBottomAction(
-                          LucideIcons.info,
-                          "详情",
-                          onTap: () => _showMoreDetailsSheet(photo),
+                          LucideIcons.moreHorizontal,
+                          "更多",
+                          onTap: () => _showMoreMenuSheet(photo),
                         ),
                       ],
                     ),

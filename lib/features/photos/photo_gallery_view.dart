@@ -5,14 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:isar/isar.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../../data/isar_service.dart';
 import '../../data/models/image_model.dart';
+import '../../core/globals.dart'; // 全局状态
 import 'photo_import_engine.dart';
 import 'photo_preview_page.dart';
 import 'photo_action_sheets.dart';
-
-// 🚀 核心新增：全局多选状态广播！用于通知骨架屏隐藏/显示底部导航
-final ValueNotifier<bool> globalMultiSelectNotifier = ValueNotifier(false);
 
 class FilterOptions {
   Set<int> ratings = {};
@@ -629,6 +628,7 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
                             onPressed: () async {
                               int count =
                                   await PhotoImportEngine.importFromSystemGallery(
+                                    context,
                                     targetAlbumId: widget.albumId,
                                   );
                               if (count > 0) {
@@ -669,7 +669,9 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
                                           ),
                                         ],
                                       ),
-                                      duration: const Duration(seconds: 3),
+                                      duration: const Duration(seconds: 4),
+                                      dismissDirection:
+                                          DismissDirection.horizontal,
                                     ),
                                   );
                                 }
@@ -731,6 +733,7 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
 
   Widget _buildGalleryGrid() {
     final int currentCols = _columnLevels[_currentColIndex];
+    final bool useMasonry = currentCols <= 3;
     final double spacing = currentCols >= 8
         ? 0.5
         : (currentCols == 4 || currentCols == 5)
@@ -739,9 +742,183 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
     final double horizontalPadding = currentCols >= 4 ? 0.0 : 4.0;
     final double borderRadius = currentCols >= 4 ? 0.0 : (36.0 / currentCols);
 
+    Widget gridWidget;
+
+    if (useMasonry) {
+      gridWidget = MasonryGridView.count(
+        key: ValueKey<int>(currentCols),
+        crossAxisCount: currentCols,
+        mainAxisSpacing: spacing,
+        crossAxisSpacing: spacing,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: EdgeInsets.only(
+          left: horizontalPadding,
+          right: horizontalPadding,
+          bottom: _isSelectingMode ? 120 : 100,
+          top: 8,
+        ),
+        itemCount: _photos.length,
+        itemBuilder: (context, index) {
+          final photo = _photos[index];
+          final double checkSize = currentCols >= 5 ? 14.0 : 24.0;
+
+          return ValueListenableBuilder<Set<int>>(
+            valueListenable: _selectedIdsNotifier,
+            builder: (context, selectedIds, _) {
+              final bool isSelected = selectedIds.contains(photo.id);
+
+              return _PhotoItem(
+                photo: photo,
+                borderRadius: borderRadius,
+                isSelectingMode: _isSelectingMode,
+                isSelected: isSelected,
+                checkSize: checkSize,
+                currentCols: currentCols,
+                useMasonry: true,
+                onLongPress: () => _enterSelection(photo.id),
+                onTapImage: () {
+                  Navigator.push(
+                    context,
+                    PageRouteBuilder(
+                      transitionDuration: const Duration(milliseconds: 300),
+                      pageBuilder: (_, __, ___) => PhotoPreviewPage(
+                        photos: _photos,
+                        initialIndex: index,
+                        multiSelectNotifier: _isSelectingMode
+                            ? _selectedIdsNotifier
+                            : null,
+                      ),
+                      transitionsBuilder: (_, animation, __, child) {
+                        return FadeTransition(opacity: animation, child: child);
+                      },
+                    ),
+                  ).then((deleted) {
+                    if (deleted == true) {
+                      _loadPhotos();
+                    }
+                  });
+                },
+                onTapCheckbox: () {
+                  HapticFeedback.selectionClick();
+                  final currentSet = Set<int>.from(_selectedIdsNotifier.value);
+                  if (isSelected)
+                    currentSet.remove(photo.id);
+                  else
+                    currentSet.add(photo.id);
+                  _selectedIdsNotifier.value = currentSet;
+                },
+                onLongPressCheckboxStart: () {
+                  HapticFeedback.lightImpact();
+                  _isDragSelecting = true;
+                  _dragStartIndex = index;
+                  _dragCurrentIndex = index;
+                  _preDragSelectedIds = Set.from(_selectedIdsNotifier.value);
+                  _dragSelectModeIsSelecting = !isSelected;
+                  final currentSet = Set<int>.from(_preDragSelectedIds);
+                  if (_dragSelectModeIsSelecting)
+                    currentSet.add(photo.id);
+                  else
+                    currentSet.remove(photo.id);
+                  _selectedIdsNotifier.value = currentSet;
+                },
+              );
+            },
+          );
+        },
+      );
+    } else {
+      gridWidget = GridView.builder(
+        key: ValueKey<int>(currentCols),
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: EdgeInsets.only(
+          left: horizontalPadding,
+          right: horizontalPadding,
+          bottom: _isSelectingMode ? 120 : 100,
+          top: 8,
+        ),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: currentCols,
+          mainAxisSpacing: spacing,
+          crossAxisSpacing: spacing,
+        ),
+        itemCount: _photos.length,
+        itemBuilder: (context, index) {
+          final photo = _photos[index];
+          final double checkSize = currentCols >= 5 ? 14.0 : 24.0;
+
+          return ValueListenableBuilder<Set<int>>(
+            valueListenable: _selectedIdsNotifier,
+            builder: (context, selectedIds, _) {
+              final bool isSelected = selectedIds.contains(photo.id);
+
+              return _PhotoItem(
+                photo: photo,
+                borderRadius: borderRadius,
+                isSelectingMode: _isSelectingMode,
+                isSelected: isSelected,
+                checkSize: checkSize,
+                currentCols: currentCols,
+                useMasonry: false,
+                onLongPress: () => _enterSelection(photo.id),
+                onTapImage: () {
+                  Navigator.push(
+                    context,
+                    PageRouteBuilder(
+                      transitionDuration: const Duration(milliseconds: 300),
+                      pageBuilder: (_, __, ___) => PhotoPreviewPage(
+                        photos: _photos,
+                        initialIndex: index,
+                        multiSelectNotifier: _isSelectingMode
+                            ? _selectedIdsNotifier
+                            : null,
+                      ),
+                      transitionsBuilder: (_, animation, __, child) {
+                        return FadeTransition(opacity: animation, child: child);
+                      },
+                    ),
+                  ).then((deleted) {
+                    if (deleted == true) {
+                      _loadPhotos();
+                    }
+                  });
+                },
+                onTapCheckbox: () {
+                  HapticFeedback.selectionClick();
+                  final currentSet = Set<int>.from(_selectedIdsNotifier.value);
+                  if (isSelected)
+                    currentSet.remove(photo.id);
+                  else
+                    currentSet.add(photo.id);
+                  _selectedIdsNotifier.value = currentSet;
+                },
+                onLongPressCheckboxStart: () {
+                  HapticFeedback.lightImpact();
+                  _isDragSelecting = true;
+                  _dragStartIndex = index;
+                  _dragCurrentIndex = index;
+                  _preDragSelectedIds = Set.from(_selectedIdsNotifier.value);
+                  _dragSelectModeIsSelecting = !isSelected;
+                  final currentSet = Set<int>.from(_preDragSelectedIds);
+                  if (_dragSelectModeIsSelecting)
+                    currentSet.add(photo.id);
+                  else
+                    currentSet.remove(photo.id);
+                  _selectedIdsNotifier.value = currentSet;
+                },
+              );
+            },
+          );
+        },
+      );
+    }
+
     return Listener(
       onPointerMove: (event) {
-        if (_isDragSelecting && _dragStartIndex != null) {
+        if (_isDragSelecting && _dragStartIndex != null && !useMasonry) {
           int? index = _calculateIndexFromPosition(event.localPosition);
           if (index != null && index != _dragCurrentIndex) {
             _dragCurrentIndex = index;
@@ -787,100 +964,12 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
             }
           }
         },
-        // 🚀 核心：使用 NotificationListener 拦截 NestedScrollView 内部网格的滚动事件
         child: NotificationListener<ScrollUpdateNotification>(
           onNotification: (notification) {
             _gridScrollOffset = notification.metrics.pixels;
             return false;
           },
-          child: GridView.builder(
-            key: ValueKey<int>(currentCols),
-            // 注意：移除了 controller，让它自动使用 NestedScrollView 注入的 PrimaryScrollController
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            padding: EdgeInsets.only(
-              left: horizontalPadding,
-              right: horizontalPadding,
-              bottom: _isSelectingMode ? 120 : 100,
-              top: 8,
-            ),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: currentCols,
-              mainAxisSpacing: spacing,
-              crossAxisSpacing: spacing,
-            ),
-            itemCount: _photos.length,
-            itemBuilder: (context, index) {
-              final photo = _photos[index];
-              final double checkSize = currentCols >= 5 ? 14.0 : 24.0;
-
-              return ValueListenableBuilder<Set<int>>(
-                valueListenable: _selectedIdsNotifier,
-                builder: (context, selectedIds, _) {
-                  final bool isSelected = selectedIds.contains(photo.id);
-
-                  return _PhotoItem(
-                    photo: photo,
-                    borderRadius: borderRadius,
-                    isSelectingMode: _isSelectingMode,
-                    isSelected: isSelected,
-                    checkSize: checkSize,
-                    currentCols: currentCols,
-                    onLongPress: () => _enterSelection(photo.id), // 🚀 触发全局状态
-                    onTapImage: () {
-                      Navigator.push(
-                        context,
-                        PageRouteBuilder(
-                          transitionDuration: const Duration(milliseconds: 300),
-                          pageBuilder: (_, __, ___) => PhotoPreviewPage(
-                            photos: _photos,
-                            initialIndex: index,
-                            multiSelectNotifier: _isSelectingMode
-                                ? _selectedIdsNotifier
-                                : null,
-                          ),
-                          transitionsBuilder: (_, animation, __, child) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: child,
-                            );
-                          },
-                        ),
-                      );
-                    },
-                    onTapCheckbox: () {
-                      HapticFeedback.selectionClick();
-                      final currentSet = Set<int>.from(
-                        _selectedIdsNotifier.value,
-                      );
-                      if (isSelected)
-                        currentSet.remove(photo.id);
-                      else
-                        currentSet.add(photo.id);
-                      _selectedIdsNotifier.value = currentSet;
-                    },
-                    onLongPressCheckboxStart: () {
-                      HapticFeedback.lightImpact();
-                      _isDragSelecting = true;
-                      _dragStartIndex = index;
-                      _dragCurrentIndex = index;
-                      _preDragSelectedIds = Set.from(
-                        _selectedIdsNotifier.value,
-                      );
-                      _dragSelectModeIsSelecting = !isSelected;
-                      final currentSet = Set<int>.from(_preDragSelectedIds);
-                      if (_dragSelectModeIsSelecting)
-                        currentSet.add(photo.id);
-                      else
-                        currentSet.remove(photo.id);
-                      _selectedIdsNotifier.value = currentSet;
-                    },
-                  );
-                },
-              );
-            },
-          ),
+          child: gridWidget,
         ),
       ),
     );
@@ -964,6 +1053,7 @@ class _PhotoItem extends StatefulWidget {
   final bool isSelected;
   final double checkSize;
   final int currentCols;
+  final bool useMasonry;
   final VoidCallback onLongPress;
   final VoidCallback onTapImage;
   final VoidCallback onTapCheckbox;
@@ -975,6 +1065,7 @@ class _PhotoItem extends StatefulWidget {
     required this.isSelected,
     required this.checkSize,
     required this.currentCols,
+    required this.useMasonry,
     required this.onLongPress,
     required this.onTapImage,
     required this.onTapCheckbox,
@@ -988,6 +1079,34 @@ class _PhotoItemState extends State<_PhotoItem> {
   bool _isPressed = false;
   @override
   Widget build(BuildContext context) {
+    final imageWidget = ExtendedImage.file(
+      File(widget.photo.path),
+      fit: BoxFit.cover,
+      enableMemoryCache: true,
+      clearMemoryCacheWhenDispose: false,
+      cacheWidth: 300,
+    );
+
+    Widget content;
+    if (widget.useMasonry) {
+      final aspectRatio = widget.photo.width / widget.photo.height;
+      final itemWidth =
+          (MediaQuery.of(context).size.width - 8) / widget.currentCols - 4;
+      final itemHeight = itemWidth / aspectRatio;
+      content = SizedBox(
+        height: itemHeight,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          child: imageWidget,
+        ),
+      );
+    } else {
+      content = ClipRRect(
+        borderRadius: BorderRadius.circular(widget.borderRadius),
+        child: imageWidget,
+      );
+    }
+
     return GestureDetector(
       onTapDown: (_) => setState(() => _isPressed = true),
       onTapUp: (_) => setState(() => _isPressed = false),
@@ -998,40 +1117,30 @@ class _PhotoItemState extends State<_PhotoItem> {
       },
       onTap: widget.onTapImage,
       child: AnimatedScale(
-        scale: _isPressed ? 0.93 : 1.0,
+        scale: _isPressed ? 0.94 : 1.0,
         duration: const Duration(milliseconds: 150),
         curve: Curves.easeOutCubic,
         child: Stack(
-          fit: StackFit.expand,
+          fit: widget.useMasonry ? StackFit.loose : StackFit.expand,
           children: [
-            Hero(
-              tag: widget.photo.path,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(widget.borderRadius),
-                child: ExtendedImage.file(
-                  File(widget.photo.path),
-                  fit: BoxFit.cover,
-                  enableMemoryCache: true,
-                  clearMemoryCacheWhenDispose: false,
-                  cacheWidth: 300,
-                ),
-              ),
-            ),
+            Hero(tag: widget.photo.path, child: content),
             if (widget.isSelected)
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(widget.borderRadius),
-                  border: Border.all(
-                    color: const Color(0xFFE70FAD),
-                    width: widget.currentCols >= 5 ? 1 : 3,
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(widget.borderRadius),
+                    border: Border.all(
+                      color: const Color(0xFFE70FAD),
+                      width: widget.currentCols >= 5 ? 1 : 3,
+                    ),
                   ),
                 ),
               ),
             if (widget.isSelectingMode)
               Positioned(
-                right: widget.currentCols >= 5 ? 4 : 8,
-                top: widget.currentCols >= 5 ? 4 : 8,
+                right: widget.currentCols >= 5 ? 4 : 4, // 5列时调整位置
+                top: widget.currentCols >= 5 ? 4 : 4, // 5列时调整位置
                 child: GestureDetector(
                   onTap: widget.onTapCheckbox,
                   onLongPressStart: (_) => widget.onLongPressCheckboxStart(),

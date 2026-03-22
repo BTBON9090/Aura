@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'data/isar_service.dart';
 import 'features/photos/photo_gallery_view.dart';
 import 'features/albums/albums_view.dart';
+import 'core/globals.dart'; // 全局状态
 
 void main() async {
   // 确保系统底层通道建立
@@ -51,16 +52,16 @@ class _MainSkeletonState extends State<MainSkeleton> {
     return Scaffold(
       // 使用 Stack 真正实现底部导航栏的“悬浮”，不挤压页面空间
       body: Stack(
-        children:[
+        children: [
           // 1. 底层页面内容区
           IndexedStack(
             index: _currentIndex,
-            children:[
+            children: [
               PhotoGalleryView(), // Tab 1: 照片
-              AlbumsView(),       // 🚀 [修改这里] 第二个 Tab：相册入口
+              AlbumsView(), // 🚀 [修改这里] 第二个 Tab：相册入口
             ],
           ),
-          
+
           // 🚀 核心重构：监听全局多选状态，多选时隐藏底部胶囊
           ValueListenableBuilder<bool>(
             valueListenable: globalMultiSelectNotifier,
@@ -69,7 +70,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
                 duration: const Duration(milliseconds: 350),
                 curve: Curves.easeOutCubic,
                 // 多选时将整个导航条沉入屏幕外 (-100)，正常时恢复为 0
-                bottom: isSelecting ? -100 : 0, 
+                bottom: isSelecting ? -100 : 0,
                 left: 0,
                 right: 0,
                 child: child!,
@@ -85,7 +86,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(32),
-                    boxShadow:[
+                    boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.08),
                         blurRadius: 20,
@@ -95,7 +96,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children:[
+                    children: [
                       _buildNavItem(0, LucideIcons.image),
                       _buildNavItem(1, LucideIcons.layoutGrid),
                     ],
@@ -128,7 +129,9 @@ class _MainSkeletonState extends State<MainSkeleton> {
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         decoration: BoxDecoration(
-          color: isSelected ? activeColor.withOpacity(0.12) : Colors.transparent,
+          color: isSelected
+              ? activeColor.withOpacity(0.12)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(28),
         ),
         child: Icon(

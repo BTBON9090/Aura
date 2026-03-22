@@ -7,6 +7,7 @@ import 'package:extended_image/extended_image.dart';
 import '../../data/isar_service.dart';
 import '../../data/models/album_model.dart';
 import '../../data/models/image_model.dart';
+import '../../core/globals.dart'; // 全局状态
 import '../photos/photo_gallery_view.dart';
 
 class AlbumsView extends StatefulWidget {
@@ -35,6 +36,20 @@ class _AlbumsViewState extends State<AlbumsView> {
   void initState() {
     super.initState();
     _refreshStats();
+    globalAlbumRefreshNotifier.addListener(_onAlbumRefresh);
+  }
+
+  @override
+  void dispose() {
+    globalAlbumRefreshNotifier.removeListener(_onAlbumRefresh);
+    super.dispose();
+  }
+
+  void _onAlbumRefresh() {
+    if (globalAlbumRefreshNotifier.value) {
+      _refreshStats();
+      globalAlbumRefreshNotifier.value = false;
+    }
   }
 
   // 🚀 核心修复：集中预加载所有数据，彻底消灭 FutureBuilder 导致的滚动卡顿和 Sliver 崩溃
@@ -387,11 +402,11 @@ class _AlbumsViewState extends State<AlbumsView> {
   Widget _buildTagSection(BuildContext context) {
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Container(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.01),
@@ -508,7 +523,7 @@ class _AlbumsViewState extends State<AlbumsView> {
       sliver: SliverGrid.builder(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
-          mainAxisSpacing: 16,
+          mainAxisSpacing: 8,
           crossAxisSpacing: 12,
           childAspectRatio: 0.75,
         ),
