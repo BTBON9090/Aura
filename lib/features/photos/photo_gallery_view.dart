@@ -27,14 +27,16 @@ class FilterOptions {
 }
 
 class PhotoGalleryView extends StatefulWidget {
-  final int? albumId; // 如果为 null，则显示全部
-  final String? filterType; // 'high_rated', 'screenshots', 'deleted' 等
-  final String title; // 页面标题
+  final int? albumId;
+  final String? filterType;
+  final String title;
+  final List<ImageModel>? photos;
   const PhotoGalleryView({
     super.key,
     this.albumId,
     this.filterType,
     this.title = 'Aura',
+    this.photos,
   });
   @override
   State<PhotoGalleryView> createState() => _PhotoGalleryViewState(); //
@@ -76,6 +78,14 @@ class _PhotoGalleryViewState extends State<PhotoGalleryView> {
 
   // 🚀 核心：加载照片
   Future<void> _loadPhotos() async {
+    if (widget.photos != null) {
+      setState(() {
+        _photos = widget.photos!;
+        _isLoading = false;
+      });
+      return;
+    }
+
     final db = IsarService.db;
     if (db == null) return;
     // 1. 基础查询：如果是回收站，找已删除的；否则找未删除的

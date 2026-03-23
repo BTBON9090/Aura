@@ -7,8 +7,9 @@ import 'package:extended_image/extended_image.dart';
 import '../../data/isar_service.dart';
 import '../../data/models/album_model.dart';
 import '../../data/models/image_model.dart';
-import '../../core/globals.dart'; // 全局状态
+import '../../core/globals.dart';
 import '../photos/photo_gallery_view.dart';
+import '../tags/tags_view.dart';
 
 class AlbumsView extends StatefulWidget {
   const AlbumsView({super.key});
@@ -23,6 +24,8 @@ class _AlbumsViewState extends State<AlbumsView> {
   // 状态缓存：标签
   int _globalTagCount = 0;
   int _untaggedCount = 0;
+  int _frequentTagCount = 0;
+  int _tagGroupCount = 0;
 
   // 状态缓存：常用相册 (存储 count 和 coverPath)
   Map<String, Map<String, dynamic>> _smartAlbumsData = {};
@@ -57,6 +60,8 @@ class _AlbumsViewState extends State<AlbumsView> {
     // 1. 加载标签
     final tags = await IsarService.getAllUniqueTags();
     final untagged = await IsarService.getUntaggedCount();
+    final frequentTags = await IsarService.getFrequentlyUsedTags();
+    final tagGroups = await IsarService.getAllTagGroups();
 
     // 2. 加载常用相册
     final allData = await _getAlbumMetadata(null);
@@ -77,6 +82,8 @@ class _AlbumsViewState extends State<AlbumsView> {
       setState(() {
         _globalTagCount = tags.length;
         _untaggedCount = untagged;
+        _frequentTagCount = frequentTags.length;
+        _tagGroupCount = tagGroups.length;
 
         _smartAlbumsData = {
           'all': allData,
@@ -423,35 +430,55 @@ class _AlbumsViewState extends State<AlbumsView> {
                 _globalTagCount,
                 isTop: true,
                 onTap: () {
-                  // TODO: 跳转至“展示所有标签”的瀑布流页
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AllTagsPage(),
+                    ),
+                  );
                 },
               ),
               const Divider(height: 1, indent: 56, color: Color(0xFFF0F0F0)),
               _buildMenuTile(
                 LucideIcons.tag,
                 "未分类标签",
-                0,
+                _untaggedCount,
                 onTap: () {
-                  // TODO: 跳转至没有进行分组的标签列表
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const UngroupedTagsPage(),
+                    ),
+                  );
                 },
               ),
               const Divider(height: 1, indent: 56, color: Color(0xFFF0F0F0)),
               _buildMenuTile(
                 LucideIcons.star,
                 "常用标签",
-                0,
+                _frequentTagCount,
                 onTap: () {
-                  // TODO: 跳转至 Marked as Common 的标签
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const FrequentTagsPage(),
+                    ),
+                  );
                 },
               ),
               const Divider(height: 1, indent: 56, color: Color(0xFFF0F0F0)),
               _buildMenuTile(
                 LucideIcons.layers,
                 "标签分组",
-                0,
+                _tagGroupCount,
                 isBottom: true,
                 onTap: () {
-                  // TODO: 🚀 这里进入你要求的“高自由度侧边栏管理界面”
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const TagGroupsPage(),
+                    ),
+                  );
                 },
               ),
             ],

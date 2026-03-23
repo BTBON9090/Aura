@@ -3,6 +3,8 @@ import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'models/image_model.dart';
 import 'models/album_model.dart';
+import 'models/tag_model.dart';
+import 'models/tag_group_model.dart';
 
 class IsarService {
   static late Isar db;
@@ -12,6 +14,8 @@ class IsarService {
     db = await Isar.open([
       ImageModelSchema,
       AlbumModelSchema,
+      TagModelSchema,
+      TagGroupModelSchema,
     ], directory: dir.path);
     // 启动后自动执行一次清理
     await cleanExpiredPhotos();
@@ -223,5 +227,146 @@ class IsarService {
         await db!.imageModels.delete(id);
       }
     });
+  }
+
+  // ================= 🚀 标签分组事务逻辑 =================
+
+  static Future<int> createTagGroup(String name) async {
+    final group = TagGroupModel()
+      ..name = name
+      ..createdTime = DateTime.now();
+
+    return await db.writeTxn(() async {
+      return await db.tagGroupModels.put(group);
+    });
+  }
+
+  static Future<List<TagGroupModel>> getAllTagGroups() async {
+    return await db.tagGroupModels.where().sortByCreatedTimeDesc().findAll();
+  }
+
+  static Future<void> deleteTagGroup(int groupId) async {
+    await db.writeTxn(() async {
+      final tags = await db.tagModels
+          .filter()
+          .groupIdEqualTo(groupId)
+          .findAll();
+      for (var tag in tags) {
+        tag.groupId = null;
+        await db.tagModels.put(tag);
+      }
+      await db.tagGroupModels.delete(groupId);
+    });
+  }
+
+  static Future<int> getTagCountInGroup(int groupId) async {
+    return await db.tagModels.filter().groupIdEqualTo(groupId).count();
+  }
+
+  // ================= 🚀 标签事务逻辑 =================
+
+  static Future<int> createTag(
+    String name, {
+    int? groupId,
+    bool isFrequentlyUsed = false,
+  }) async {
+    final tag = TagModel()
+      ..name = name
+      ..groupId = groupId
+      ..isFrequentlyUsed = isFrequentlyUsed
+      ..createdTime = DateTime.now()
+      ..modifiedTime = DateTime.now();
+
+    return await db.writeTxn(() async {
+      return await db.tagModels.put(tag);
+    });
+  }
+
+  static Future<List<TagModel>> getAllTags() async {
+    return await db.tagModels.where().sortByModifiedTimeDesc().findAll();
+  }
+
+  static Future<List<TagModel>> getTagsSortedByName() async {
+    return await db.tagModels.where().sortByName().findAll();
+  }
+
+  static Future<List<TagModel>> getUngroupedTags() async {
+    return await db.tagModels
+        .filter()
+        .groupIdIsNull()
+        .sortByModifiedTimeDesc()
+        .findAll();
+  }
+
+  static Future<List<TagModel>> getFrequentlyUsedTags() async {
+    return await db.tagModels
+        .filter()
+        .isFrequentlyUsedEqualTo(true)
+        .sortByModifiedTimeDesc()
+        .findAll();
+  }
+
+  static Future<List<TagModel>> getTagsInGroup(int groupId) async {
+    return await db.tagModels
+        .filter()
+        .groupIdEqualTo(groupId)
+        .sortByModifiedTimeDesc()
+        .findAll();
+  }
+
+  static Future<void> updateTag(
+    int tagId, {
+    String? name,
+    int? groupId,
+    bool? isFrequentlyUsed,
+    bool clearGroup = false,
+  }) async {
+    await db.writeTxn(() async {
+      final tag = await db.tagModels.get(tagId);
+      if (tag != null) {
+        if (name != null) tag.name = name;
+        if (clearGroup) {
+          tag.groupId = null;
+        } else if (groupId != null) {
+          tag.groupId = groupId;
+        }
+        if (isFrequentlyUsed != null) tag.isFrequentlyUsed = isFrequentlyUsed;
+        tag.modifiedTime = DateTime.now();
+        await db.tagModels.put(tag);
+      }
+    });
+  }
+
+  static Future<void> deleteTag(int tagId) async {
+    await db.writeTxn(() async {
+      final tag = await db.tagModels.get(tagId);
+      if (tag != null) {
+        final photos = await db.imageModels
+            .filter()
+            .tagsElementContains(tag.name)
+            .findAll();
+        for (var photo in photos) {
+          photo.tags.remove(tag.name);
+          await db.imageModels.put(photo);
+        }
+        await db.tagModels.delete(tagId);
+      }
+    });
+  }
+
+  static Future<int> getPhotoCountWithTag(String tagName) async {
+    return await db.imageModels
+        .filter()
+        .deletedTimeIsNull()
+        .tagsElementContains(tagName)
+        .count();
+  }
+
+  static Future<List<ImageModel>> getPhotosWithTag(String tagName) async {
+    return await db.imageModels
+        .filter()
+        .deletedTimeIsNull()
+        .tagsElementContains(tagName)
+        .findAll();
   }
 }

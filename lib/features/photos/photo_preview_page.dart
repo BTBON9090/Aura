@@ -41,6 +41,8 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
   bool _isLongPressingPrev = false;
   bool _isLongPressingNext = false;
 
+  final Set<int> _zoomedImages = {};
+
   bool get _isSimplifiedMode => widget.multiSelectNotifier != null;
 
   @override
@@ -53,6 +55,25 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
+  }
+
+  void _precacheFullImmersiveImages(int index) {
+    for (int i = index - 5; i <= index + 5; i++) {
+      if (i >= 0 && i < widget.photos.length) {
+        precacheImage(
+          ResizeImage(FileImage(File(widget.photos[i].path)), width: 1080),
+          context,
+        );
+      }
+    }
+  }
+
+  void _onFullImmersiveImageZoom(int index, double scale) {
+    if (scale > 1.3 && !_zoomedImages.contains(index)) {
+      setState(() {
+        _zoomedImages.add(index);
+      });
+    }
   }
 
   @override
@@ -96,17 +117,39 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
   void _goToPreviousPhoto() {
     if (_currentIndex > 0) {
       final targetIndex = _currentIndex - 1;
-      _pageController.jumpToPage(targetIndex);
-      setState(() => _currentIndex = targetIndex);
+      _switchToPhoto(targetIndex);
     }
   }
 
   void _goToNextPhoto() {
     if (_currentIndex < widget.photos.length - 1) {
       final targetIndex = _currentIndex + 1;
-      _pageController.jumpToPage(targetIndex);
-      setState(() => _currentIndex = targetIndex);
+      _switchToPhoto(targetIndex);
     }
+  }
+
+  void _switchToPhoto(int targetIndex) {
+    final targetPath = widget.photos[targetIndex].path;
+    final imageProvider = ResizeImage(FileImage(File(targetPath)), width: 1080);
+
+    final ImageStream stream = imageProvider.resolve(ImageConfiguration.empty);
+    final listener = ImageStreamListener(
+      (ImageInfo info, bool synchronousCall) {
+        if (mounted) {
+          _pageController.jumpToPage(targetIndex);
+          setState(() => _currentIndex = targetIndex);
+          _precacheFullImmersiveImages(targetIndex);
+        }
+      },
+      onError: (exception, stackTrace) {
+        if (mounted) {
+          _pageController.jumpToPage(targetIndex);
+          setState(() => _currentIndex = targetIndex);
+        }
+      },
+    );
+
+    stream.addListener(listener);
   }
 
   void _startLongPressPrev() {
@@ -1255,15 +1298,18 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                 physics: const PageScrollPhysics(),
                 onPageChanged: (int index) {
                   setState(() => _currentIndex = index);
+                  _precacheFullImmersiveImages(index);
                 },
                 itemBuilder: (BuildContext context, int index) {
                   final item = widget.photos[index];
+                  final useOriginal = _zoomedImages.contains(index);
                   return ExtendedImage.file(
                     File(item.path),
                     fit: BoxFit.contain,
                     mode: ExtendedImageMode.gesture,
                     enableMemoryCache: true,
                     clearMemoryCacheWhenDispose: false,
+                    cacheWidth: useOriginal ? null : 1080,
                     loadStateChanged: (ExtendedImageState state) {
                       if (state.extendedImageLoadState == LoadState.loading) {
                         return ExtendedImage.file(
@@ -1289,6 +1335,10 @@ class _PhotoPreviewPageState extends State<PhotoPreviewPage>
                       final pointerDownPosition = state.pointerDownPosition;
                       final begin = state.gestureDetails?.totalScale ?? 1.0;
                       final end = begin < 1.5 ? 2.5 : 1.0;
+
+                      if (end > 1.5) {
+                        _onFullImmersiveImageZoom(index, end);
+                      }
 
                       _doubleClickAnimation?.removeListener(
                         _doubleClickAnimationListener,

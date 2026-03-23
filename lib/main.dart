@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 🚀 引入震动反馈
+import 'package:flutter/services.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-// 引入数据库和各个子页面
 import 'data/isar_service.dart';
 import 'features/photos/photo_gallery_view.dart';
 import 'features/albums/albums_view.dart';
-import 'core/globals.dart'; // 全局状态
+import 'core/globals.dart';
 
 void main() async {
   // 确保系统底层通道建立
@@ -56,10 +55,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
           // 1. 底层页面内容区
           IndexedStack(
             index: _currentIndex,
-            children: [
-              PhotoGalleryView(), // Tab 1: 照片
-              AlbumsView(), // 🚀 [修改这里] 第二个 Tab：相册入口
-            ],
+            children: [PhotoGalleryView(), AlbumsView()],
           ),
 
           // 🚀 核心重构：监听全局多选状态，多选时隐藏底部胶囊
@@ -78,7 +74,7 @@ class _MainSkeletonState extends State<MainSkeleton> {
             },
             child: SafeArea(
               child: Container(
-                alignment: Alignment.bottomCenter, // 保持居中
+                alignment: Alignment.bottomCenter,
                 margin: const EdgeInsets.only(bottom: 24),
                 child: Container(
                   width: 148,
